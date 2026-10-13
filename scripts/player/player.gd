@@ -67,6 +67,7 @@ var debug_iframe: bool = false
 @onready var _body_visual: Polygon2D = $BodyVisual
 @onready var _hitbox: Area2D = $AttackHitbox
 @onready var _hurtbox: Area2D = $Hurtbox
+@onready var _camera: Camera2D = $Camera2D
 
 
 func setup(config: Resource) -> void:
@@ -81,6 +82,7 @@ func _ready() -> void:
 		_hitbox.hit_landed.connect(_on_hit_landed)
 	if _hurtbox:
 		_hurtbox.area_entered.connect(_on_hurtbox_entered)
+	_init_camera()
 
 
 func _sm_try_init() -> void:
@@ -109,6 +111,9 @@ func _sm_try_init() -> void:
 func _physics_process(delta: float) -> void:
 	if feel == null or _sm == null:
 		return
+
+	# ---- 相机跟随：即使顿帧也保持更新，避免画面卡住 ----
+	_update_camera(delta)
 
 	# ---- 顿帧：实体逻辑整体冻结（动画/粒子/UI 不受影响）----
 	if _game_time_is_frozen():
@@ -516,6 +521,73 @@ func _on_hit_landed(_target: Node2D, _damage: int, _knockback: float, is_kill: b
 		return
 	if is_kill:
 		gt.request_hitstop(feel.hitstop_kill_frames)
+
+
+# ============================================================
+# 相机：死区跟随（任务 0.1 修复 / 手感需求）
+# ============================================================
+#
+# 需求：「主控可以短暂脱离中心，但相机要迅速跟上」
+# 实现：死区（deadzone）跟随
+#   - 玩家在死区矩形内移动 → 相机完全不动 → 允许短暂脱离中心
+#   - 玩家超出死区 → 相机以指数衰减速度迅速追上
+#
+# 为什么不用 Camera2D 内置的 position_smoothing：
+#   那是纯粹的位置平滑，玩家一动相机就跟着动（只是有延迟），
+#   无法表达"允许脱离中心一段距离"这个需求，也没有死区概念。
+
+## 相机注视点当前所在的世界坐标
+var _cam_anchor: Vector2 = Vector2.ZERO
+var _cam_initialized: bool = false
+
+
+func _init_camera() -> void:
+	if _camera == null:
+		push_warning("Player 缺少 Camera2D 节点 —— 相机不会跟随")
+		return
+	# 相机是 top_level：不继承玩家变换，位置完全由代码控制
+	_camera.top_level = true
+	_camera.global_position = _cam_target_now()
+	_cam_anchor = _camera.global_position
+	_cam_initialized = true
+
+
+## 当前理想注视点（玩家脚下 + 配置偏移）
+func _cam_target_now() -> Vector2:
+	var off_y: float = feel.cam_look_offset_y if feel else -46.0
+	return Vector2(global_position.x, global_position.y + off_y)
+
+
+func _update_camera(delta: float) -> void:
+	if _camera == null or feel == null:
+		return
+	if not _cam_initialized:
+		_cam_anchor = _camera.global_position
+		_cam_initialized = true
+
+	var target: Vector2 = _cam_target_now()
+	var dz_x: float = feel.cam_deadzone_x
+	var dz_y: float = feel.cam_deadzone_y
+
+	# ---- 死区内不动，超出部分才作为跟随目标 ----
+	var desired: Vector2 = _cam_anchor
+	if target.x > _cam_anchor.x + dz_x:
+		desired.x = target.x - dz_x
+	elif target.x < _cam_anchor.x - dz_x:
+		desired.x = target.x + dz_x
+	if target.y > _cam_anchor.y + dz_y:
+		desired.y = target.y - dz_y
+	elif target.y < _cam_anchor.y - dz_y:
+		desired.y = target.y + dz_y
+
+	# ---- 指数衰减跟随：与帧率无关，超出越多追得越快 ----
+	var speed: float = feel.cam_follow_speed
+	if not is_on_floor():
+		speed *= feel.cam_air_mult
+	var t: float = 1.0 - exp(-speed * delta)
+	_cam_anchor = _cam_anchor.lerp(desired, t)
+
+	_camera.global_position = _cam_anchor
 
 
 # ============================================================

@@ -11,7 +11,10 @@ extends SceneTree
 ## ⚠️ 必须设置 DSH_SKIP_BOOT_QUIT=1，否则 boot.gd 的 headless 自检会提前退出整个 SceneTree。
 
 const GROUND_TOP := 14.0          ## 测试场景地面顶部的全局 y
-const CLEAR_COLUMN_X := 330.0     ## 无天花板 / 无平台的空旷列
+## 无遮挡列：此 x 从高空直落地面不会被任何平台接住。
+## ⚠️ 改动关卡布局后必须重新核对这个值 —— 否则"落地"用例会静默测到错误的地面。
+##    核对方法：见 test_level.tscn 顶部注释里的「空列不变式」。
+const CLEAR_COLUMN_X := 520.0
 const EPSILON_Y := 2.0
 
 const CASE_COUNT := 3

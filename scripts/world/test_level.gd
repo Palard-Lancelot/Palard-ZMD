@@ -8,7 +8,7 @@ extends Node2D
 ## 手感没调对之前画美术等于白画（DESIGN.md 第 7 节）。
 
 ## 出生点：站在地面上（脚底对齐 y=0），且头顶无遮挡、不在平台正下方
-const SPAWN_POSITION := Vector2(225, 0)
+const SPAWN_POSITION := Vector2(240, 0)
 
 ## 掉出这个高度以下就重生
 const DEATH_Y := 200.0

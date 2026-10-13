@@ -38,6 +38,9 @@ shape = SubResource("RectangleShape2D_hurtbox")
 position = Vector2(10, -13)
 
 [node name="Camera2D" type="Camera2D" parent="."]
-position = Vector2(0, -40)
-position_smoothing_enabled = true
-position_smoothing_speed = 8.0
+top_level = true
+position_smoothing_enabled = false
+limit_left = -180
+limit_top = -220
+limit_right = 1140
+limit_bottom = 60

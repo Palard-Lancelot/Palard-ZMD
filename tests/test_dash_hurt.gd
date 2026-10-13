@@ -16,7 +16,9 @@ extends SceneTree
 
 const CASE_COUNT := 3
 const GROUND_TOP := 14.0
-const CLEAR_COLUMN_X := 330.0
+## 无遮挡列（与 test_movement.gd 保持一致）。
+## ⚠️ 关卡布局改动后必须重新核对。
+const CLEAR_COLUMN_X := 520.0
 
 var _player: CharacterBody2D = null
 var _started := false
