@@ -1,0 +1,52 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/enemies/dummy.gd" id="1_dummy"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
+size = Vector2(16, 26)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_hurt"]
+size = Vector2(18, 28)
+
+[node name="Dummy" type="StaticBody2D"]
+collision_layer = 4
+collision_mask = 0
+script = ExtResource("1_dummy")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -13)
+shape = SubResource("RectangleShape2D_body")
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.95, 0.45, 0.35, 1)
+polygon = PackedVector2Array(-8, -26, 8, -26, 8, 0, -8, 0)
+
+[node name="EyeL" type="Polygon2D" parent="."]
+color = Color(0.1, 0.05, 0.05, 1)
+polygon = PackedVector2Array(-5, -21, -2, -21, -2, -17, -5, -17)
+
+[node name="EyeR" type="Polygon2D" parent="."]
+color = Color(0.1, 0.05, 0.05, 1)
+polygon = PackedVector2Array(2, -21, 5, -21, 5, -17, 2, -17)
+
+[node name="Hurtbox" type="Area2D" parent="."]
+collision_layer = 4
+collision_mask = 0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Hurtbox"]
+position = Vector2(0, -13)
+shape = SubResource("RectangleShape2D_hurt")
+
+[node name="HpBarBg" type="ColorRect" parent="."]
+offset_left = -11.0
+offset_top = -34.0
+offset_right = 11.0
+offset_bottom = -30.0
+color = Color(0.12, 0.1, 0.12, 1)
+mouse_filter = 2
+
+[node name="HpBar" type="ColorRect" parent="HpBarBg"]
+offset_right = 22.0
+offset_bottom = 4.0
+color = Color(0.35, 0.9, 0.4, 1)
+mouse_filter = 2

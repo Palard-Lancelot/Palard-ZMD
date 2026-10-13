@@ -16,6 +16,10 @@ config/version="0.1.0"
 run/main_scene="res://scenes/boot/boot.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
+[autoload]
+
+GameTime="*res://scripts/core/game_time.gd"
+
 [display]
 
 window/size/viewport_width=480

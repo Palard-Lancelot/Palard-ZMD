@@ -36,6 +36,7 @@ func _ready() -> void:
 	else:
 		push_warning("World 节点没有 setup_player() 方法 —— 玩家将拿不到手感配置")
 
+	_register_game_time()
 	_print_feel_summary()
 	_print_validation()
 
@@ -48,7 +49,26 @@ func _ready() -> void:
 		_log("headless 自检完成，退出")
 		get_tree().quit()
 	else:
-		_log("进入游戏 —— R 重生 · F1 调参 · Esc 退出")
+		_log("进入游戏 —— A/D 移动 · Space 跳 · L 攻击 · R 重生 · F1 调参")
+
+
+## 把玩家相机注册到 GameTime，屏震才有作用对象
+func _register_game_time() -> void:
+	var gt := get_node_or_null("/root/GameTime")
+	if gt == null:
+		push_warning("GameTime 单例不存在 —— 检查 project.godot 的 [autoload] 段")
+		return
+	var cam := world.get_node_or_null("Player/Camera2D") as Camera2D
+	if cam:
+		gt.register_camera(cam)
+		_log("相机已注册到 GameTime（屏震可用）")
+
+
+## 驱动 GameTime 每物理帧推进（必须在玩家之前，否则顿帧计数会晚一帧）
+func _physics_process(_delta: float) -> void:
+	var gt := get_node_or_null("/root/GameTime")
+	if gt:
+		gt.tick()
 
 
 func _unhandled_input(event: InputEvent) -> void:

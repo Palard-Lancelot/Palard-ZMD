@@ -51,6 +51,12 @@ func setup_player(config: Resource) -> void:
 func respawn() -> void:
 	player.position = _spawn
 	player.velocity = Vector2.ZERO
+	if player.has_method("respawn"):
+		player.respawn()
+	# 复活所有假人，方便反复测试打击感
+	for d in get_tree().get_nodes_in_group("dummy"):
+		if d.has_method("revive"):
+			d.revive()
 	_cleared = false
 
 
