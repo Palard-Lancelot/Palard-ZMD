@@ -49,7 +49,7 @@ func _ready() -> void:
 		_log("headless 自检完成，退出")
 		get_tree().quit()
 	else:
-		_log("进入游戏 —— A/D 移动 · Space 跳 · L 攻击 · R 重生 · F1 调参")
+		_log("进入游戏 —— A/D 移动 · Space 跳 · J 攻击 · R 重生 · F1 调参")
 
 
 ## 把玩家相机注册到 GameTime，屏震才有作用对象
