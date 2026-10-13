@@ -15,9 +15,14 @@ var _shape_node: CollisionShape2D
 
 
 func _ready() -> void:
-	# 自身在 layer 5（enemy_attack），检测 layer 6（player_hurtbox）
-	collision_layer = 16       # bit 5 = layer 5
-	collision_mask = 32        # bit 6 = layer 6
+	# 碰撞检测是**双向匹配**：双方都要在对方的 mask 里才会产生 area_entered 信号。
+	#   本盒        : layer 5（enemy_attack = bit 16）, mask 含 layer 6（player_hurtbox = bit 32）
+	#   玩家 Hurtbox: layer 6,                        mask 含 layer 5
+	# 任一侧缺失都会导致"看起来配置对了但收不到信号"。
+	collision_layer = 16
+	collision_mask = 32
+	monitoring = false
+	monitorable = true
 	_shape_node = $CollisionShape2D
 	_set_active(false)
 

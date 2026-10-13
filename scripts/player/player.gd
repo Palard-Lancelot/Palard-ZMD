@@ -73,11 +73,13 @@ var debug_iframe: bool = false
 func setup(config: Resource) -> void:
 	feel = config
 	add_to_group("feel_config_holder")
+	add_to_group("player")
 	_sm_try_init()
 
 
 func _ready() -> void:
 	_sm_try_init()
+	add_to_group("player")
 	if _hitbox:
 		_hitbox.hit_landed.connect(_on_hit_landed)
 	if _hurtbox:

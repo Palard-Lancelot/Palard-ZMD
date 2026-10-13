@@ -48,6 +48,10 @@ var _recovery_left: int = 0
 @onready var _hp_bar_bg: ColorRect = $HpBarBg
 @onready var _attack_box: Area2D = $EnemyAttackBox
 
+## 攻击朝向（1 = 朝右，-1 = 朝左）。起手前摇时根据玩家位置决定。
+var _facing: float = 1.0
+var _player: Node2D = null
+
 
 func _ready() -> void:
 	hp = max_hp
@@ -56,6 +60,7 @@ func _ready() -> void:
 	if not hostile and _attack_box:
 		_attack_box.visible = false
 	_attack_timer = ATTACK_COOLDOWN
+	_player = get_tree().get_first_node_in_group("player")
 
 
 func _physics_process(_delta: float) -> void:
@@ -111,11 +116,40 @@ func _tick_attack() -> void:
 
 func _begin_windup() -> void:
 	_windup_left = WINDUP_FRAMES
+	_face_player()
 	_body.color = TELEGRAPH_COLOR
 	if _eye_l:
 		_eye_l.color = Color(0.5, 0.15, 0.05, 1)
 	if _eye_r:
 		_eye_r.color = Color(0.5, 0.15, 0.05, 1)
+	# 前摇期间就把攻击盒移到正确方向，让玩家能预判打击范围
+	_apply_facing()
+
+
+## 起手前摇时转向玩家。这是"攻击可被预判"的一部分 ——
+## 玩家看到前摇变黄且方向确定，就知道该往哪边躲。
+func _face_player() -> void:
+	if _player == null:
+		_player = get_tree().get_first_node_in_group("player")
+	if _player == null:
+		return
+	var dx: float = _player.global_position.x - global_position.x
+	if absf(dx) > 1.0:
+		_facing = signf(dx)
+
+
+## 把朝向应用到视觉与攻击盒
+func _apply_facing() -> void:
+	if _body:
+		_body.scale.x = absf(_body.scale.x) * _facing
+	if _eye_l:
+		_eye_l.scale.x = _facing
+	if _eye_r:
+		_eye_r.scale.x = _facing
+	if _attack_box:
+		var shape_node := _attack_box.get_node_or_null("CollisionShape2D") as CollisionShape2D
+		if shape_node:
+			shape_node.position.x = 16.0 * _facing
 
 
 func _start_active() -> void:
