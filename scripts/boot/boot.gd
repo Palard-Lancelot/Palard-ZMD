@@ -19,6 +19,7 @@ const BOOTSTRAP_LOG_PREFIX := "[BOOT]"
 var feel: Resource = null
 
 @onready var debug_panel: CanvasLayer = $DebugPanel
+@onready var world: Node2D = $World
 
 
 func _ready() -> void:
@@ -28,13 +29,26 @@ func _ready() -> void:
 	debug_panel.bind(feel)
 	_log("调试面板已绑定 —— 按 F1 打开")
 
+	# 把手感配置注入世界（玩家从 TestLevel 拿到它）
+	if world.has_method("setup_player"):
+		world.setup_player(feel)
+		_log("FeelConfig 已注入 World")
+	else:
+		push_warning("World 节点没有 setup_player() 方法 —— 玩家将拿不到手感配置")
+
 	_print_feel_summary()
 	_print_validation()
 
-	# 无头模式下直接退出，供 CI / 命令行自检使用
-	if DisplayServer.get_name() == "headless":
+	# 无头模式下直接退出，供命令行自检使用。
+	# ⚠️ 自动化测试会以本场景为依赖加载，此时必须跳过退出，
+	#    否则整个 SceneTree 会提前结束，测试跑不完。
+	#    用法：设置环境变量 DSH_SKIP_BOOT_QUIT=1
+	var skip_quit := OS.get_environment("DSH_SKIP_BOOT_QUIT") == "1"
+	if DisplayServer.get_name() == "headless" and not skip_quit:
 		_log("headless 自检完成，退出")
 		get_tree().quit()
+	else:
+		_log("进入游戏 —— R 重生 · F1 调参 · Esc 退出")
 
 
 func _unhandled_input(event: InputEvent) -> void:

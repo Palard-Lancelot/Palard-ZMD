@@ -18,7 +18,11 @@ extends CanvasLayer
 const FeelConfigScript := preload("res://scripts/config/feel_config.gd")
 
 const SAVE_PATH := "user://feel_config_saved.tres"
-const PANEL_WIDTH := 300.0
+## 面板宽度按「视口坐标」计（CanvasLayer 随 stretch 一起缩放）。
+## 基准视口 480×270 → 150 约占 31%，留够空间看游戏。
+const PANEL_WIDTH := 150.0
+const FONT_SMALL := 8
+const FONT_TITLE := 11
 
 var feel: Resource = null
 
@@ -32,9 +36,9 @@ var _groups: Dictionary = {}       ## group_name -> VBoxContainer
 func _ready() -> void:
 	layer = 100
 	_build_ui()
-	# debug 构建下默认展开：否则新手根本不知道有这个面板
-	# （正式导出后 is_debug_build() 为 false，默认隐藏）
-	visible = OS.is_debug_build()
+	# 默认隐藏：让玩家先纯粹感受手感，需要调参时按 F1 打开。
+	# （之前设成 is_debug_build() 默认展开，实测面板会挡住游戏主体）
+	visible = false
 
 
 ## 由 boot.gd 调用：绑定手感配置并生成滑块
@@ -62,18 +66,17 @@ func _unhandled_input(event: InputEvent) -> void:
 # ============================================================
 
 func _build_ui() -> void:
-	# 直接把 PanelContainer 锚定到右侧。
-	# ⚠️ 不要用 MarginContainer + set_anchors_preset 做定位：
-	#    CanvasLayer 没有尺寸，锚点会解析为 0，面板会被放到屏幕外。
+	# 面板放在**左上角**（不是右上角）：玩家出生点在画面中部，
+	# 右上角会挡住游戏主体；左上角只压住背景。
 	_root = PanelContainer.new()
-	_root.anchor_left = 1.0
-	_root.anchor_right = 1.0
+	_root.anchor_left = 0.0
+	_root.anchor_right = 0.0
 	_root.anchor_top = 0.0
 	_root.anchor_bottom = 0.0
-	_root.offset_left = -PANEL_WIDTH - 8.0
-	_root.offset_right = -8.0
-	_root.offset_top = 8.0
-	_root.offset_bottom = 8.0
+	_root.offset_left = 6.0
+	_root.offset_right = 6.0 + PANEL_WIDTH
+	_root.offset_top = 6.0
+	_root.offset_bottom = 6.0
 	_root.grow_vertical = Control.GROW_DIRECTION_END
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_root)
@@ -84,34 +87,36 @@ func _build_ui() -> void:
 
 	# --- 标题 ---
 	var title := Label.new()
-	title.text = "手感调参面板"
-	title.add_theme_font_size_override("font_size", 14)
+	title.text = "手感调参"
+	title.add_theme_font_size_override("font_size", FONT_TITLE)
 	outer.add_child(title)
 
 	# --- 状态行 ---
 	_status = Label.new()
 	_status.text = "未绑定 FeelConfig"
-	_status.add_theme_font_size_override("font_size", 9)
+	_status.add_theme_font_size_override("font_size", FONT_SMALL)
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.modulate = Color(0.7, 0.9, 0.7)
 	outer.add_child(_status)
 
 	var keys := Label.new()
 	keys.text = "F1 开关 · F5 保存 · R 重置"
-	keys.add_theme_font_size_override("font_size", 9)
+	keys.add_theme_font_size_override("font_size", FONT_SMALL)
 	keys.modulate = Color(0.65, 0.65, 0.7)
 	outer.add_child(keys)
 
 	outer.add_child(HSeparator.new())
 
 	# --- 滚动区 ---
+	# 高度按视口 270 计：留出标题/状态行后约 200
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(PANEL_WIDTH - 16.0, 460.0)
+	scroll.custom_minimum_size = Vector2(PANEL_WIDTH - 14.0, 200.0)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	outer.add_child(scroll)
 
 	_list = VBoxContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("separation", 2)
+	_list.add_theme_constant_override("separation", 1)
 	scroll.add_child(_list)
 
 
@@ -133,7 +138,11 @@ func _rebuild_rows() -> void:
 		var ptype: int = prop.get("type", 0)
 		var pusage: int = prop.get("usage", 0)
 
-		# PROPERTY_USAGE_GROUP 的 name 就是分组名
+		# PROPERTY_USAGE_GROUP 的 name 就是分组名。
+		# ⚠️ 必须排除 PROPERTY_USAGE_CATEGORY：脚本的类描述会被当成
+		#    一个 category 抛出来（显示为 "— Resource"），那是垃圾分组。
+		if pusage & PROPERTY_USAGE_CATEGORY:
+			continue
 		if pusage & PROPERTY_USAGE_GROUP:
 			current_group = pname
 			_add_group_header(current_group)
@@ -151,8 +160,8 @@ func _rebuild_rows() -> void:
 
 func _add_group_header(group_name: String) -> void:
 	var header := Label.new()
-	header.text = "— " + group_name
-	header.add_theme_font_size_override("font_size", 10)
+	header.text = "· " + group_name
+	header.add_theme_font_size_override("font_size", FONT_SMALL + 1)
 	header.modulate = Color(0.55, 0.8, 1.0)
 	_list.add_child(header)
 
@@ -192,7 +201,8 @@ func _add_slider_row(pname: String, ptype: int, group_name: String) -> void:
 
 	var label := Label.new()
 	label.text = "%s = %s" % [pname, _fmt(value, is_int)]
-	label.add_theme_font_size_override("font_size", 10)
+	label.add_theme_font_size_override("font_size", FONT_SMALL)
+	label.clip_text = true
 	row.add_child(label)
 
 	var slider := HSlider.new()
@@ -200,7 +210,7 @@ func _add_slider_row(pname: String, ptype: int, group_name: String) -> void:
 	slider.max_value = vmax
 	slider.step = vstep
 	slider.value = float(value)
-	slider.custom_minimum_size = Vector2(PANEL_WIDTH - 40.0, 0.0)
+	slider.custom_minimum_size = Vector2(PANEL_WIDTH - 26.0, 0.0)
 	row.add_child(slider)
 
 	_sliders[pname] = {
