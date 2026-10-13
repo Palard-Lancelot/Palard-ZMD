@@ -218,6 +218,11 @@ max_hp = 50
 [node name="Dummy3" parent="." instance=ExtResource("3_dummy")]
 position = Vector2(120, -40)
 
+[node name="HostileDummy" parent="." instance=ExtResource("3_dummy")]
+position = Vector2(-20, -56)
+hostile = true
+max_hp = 40
+
 [node name="AttackHint" type="Label" parent="."]
 offset_left = 250.0
 offset_top = -18.0

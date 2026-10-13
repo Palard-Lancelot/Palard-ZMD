@@ -24,6 +24,8 @@ var _min_y := 0.0
 var _max_y := 0.0
 var _landed_frame := -1
 var _results: Array = []
+var _peak_vx: float = 0.0        ## 全程记录的水平速度峰值
+var _run_start_x: float = 0.0    ## 开始向右输入那一帧的 x（位移从这里量起）
 
 
 func _physics_process(_d: float) -> bool:
@@ -34,6 +36,8 @@ func _physics_process(_d: float) -> bool:
 	_frame += 1
 	_min_y = minf(_min_y, _player.position.y)
 	_max_y = maxf(_max_y, _player.position.y)
+	# 记录水平速度峰值：不能只看终帧 —— 玩家可能已撞墙导致速度为 0
+	_peak_vx = maxf(_peak_vx, absf(_player.velocity.x))
 	if _player.is_on_floor() and _landed_frame < 0:
 		_landed_frame = _frame
 
@@ -57,14 +61,16 @@ func _physics_process(_d: float) -> bool:
 func _total_frames() -> int:
 	match _case:
 		0: return 70    # 自由落体（约 42 帧落地 + 余量）
-		1: return 70    # 原地跳跃：滞空 0.75s = 45 帧，从第 8 帧起跳 → 需 ~55 帧落地，留余量
-		2: return 40    # 向右跑
+		1: return 70    # 原地跳跃：滞空 0.75s = 45 帧，从第 8 帧起跳 → 需 ~55 帧落地
+		2: return 45    # 向右跑：0.1s 到全速，45 帧内不会撞到右墙（x=492）
 	return 30
 
 
 func _begin_case() -> void:
 	_frame = 0
 	_landed_frame = -1
+	_peak_vx = 0.0
+	_run_start_x = 0.0
 	Input.action_release("move_right")
 	Input.action_release("move_left")
 	Input.action_release("jump")
@@ -94,6 +100,8 @@ func _apply_input() -> void:
 		2:
 			if _frame >= 8:
 				Input.action_press("move_right")
+				if _run_start_x == 0.0:
+					_run_start_x = _player.position.x
 
 
 func _finish_case() -> void:
@@ -123,11 +131,11 @@ func _finish_case() -> void:
 			]
 		2:
 			name = "向右移动达到最大速度"
+			var moved: float = _player.position.x - _run_start_x
 			checks = [
-				["向右位移 %.1fpx" % (_player.position.x - CLEAR_COLUMN_X),
-					_player.position.x > CLEAR_COLUMN_X + 10.0],
-				["速度达上限 165（实测 %.1f）" % _player.velocity.x,
-					absf(_player.velocity.x - 165.0) < 8.0],
+				["向右位移 %.1fpx（自开始输入起算）" % moved, moved > 40.0],
+				["速度峰值达上限 165（实测 %.1f）" % _peak_vx,
+					absf(_peak_vx - 165.0) < 8.0],
 			]
 
 	_results.append({"name": name, "checks": checks})

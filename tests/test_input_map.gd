@@ -17,7 +17,7 @@ const EXPECTED := {
 	"move_down":  [83, 4194322],          # S / Down
 	"jump":       [32],                   # 仅 Space（J 已移除）
 	"attack":     [74],                   # J（原 L=76 已改）
-	"dash":       [75],                   # K
+	"dash":       [76],                   # L（原 K=75 已改）
 }
 
 var _results: Array = []

@@ -1,45 +1,134 @@
 extends StaticBody2D
-## 训练假人（阶段 0 任务 0.7–0.8）
+## 训练假人（阶段 0 任务 0.7–0.10）
 ##
-## 用途：让攻击有可打的目标，从而验证「三段连击 / 顿帧 / 屏震 / 击中反馈」。
-## 它不是真正的敌人 AI —— 真正的敌人 AI 在任务 0.10。
+## 两种形态，由 `hostile` 开关切换：
+##   hostile = false  纯靶子，不还手（默认，用于测攻击手感）
+##   hostile = true   会周期性攻击，带清晰前摇（用于测受击 / 冲刺无敌帧）
 ##
-## 接口约定（命中盒通过它造成伤害）：
-##   hp: int              当前血量（命中盒读它判断是否击杀）
-##   take_hit(damage, from_position)
+## ⚠️ 支柱2 硬要求（DESIGN.md 第 1 节）：
+##   任何能造成伤害的攻击都必须有**清晰前摇**（telegraph），
+##   否则就是"无效死亡"，直接违反支柱2。
+##
+## 攻击节奏：
+##   冷却 WINDUP_DELAY 帧 → 前摇 WINDUP 帧（变红放大，这是给玩家的预警）
+##   → 有效帧 ACTIVE 帧（攻击盒开启）→ 后摇 RECOVERY 帧
 
 signal died
 
-## 命中盒会读取这个属性
-var hp: int = 30
+@export var hostile: bool = false
 @export var max_hp: int = 30
+
+## 命中盒读取
+var hp: int = 30
+
+const BASE_COLOR := Color(0.95, 0.45, 0.35, 1.0)
+const TELEGRAPH_COLOR := Color(1.0, 0.85, 0.25, 1.0)
+const FLASH_COLOR := Color(1.0, 1.0, 1.0, 1.0)
+const DEAD_COLOR := Color(0.25, 0.2, 0.22, 1.0)
+
+## 攻击节奏（帧）
+const ATTACK_COOLDOWN := 70
+const WINDUP_FRAMES := 18      ## 前摇较长，给玩家充足反应时间
+const ACTIVE_FRAMES := 6
+const RECOVERY_FRAMES := 16
 
 var _flash_frames: int = 0
 var _is_dead: bool = false
 
+## 攻击循环
+var _attack_timer: int = 0
+var _windup_left: int = 0
+var _active_left: int = 0
+var _recovery_left: int = 0
+
 @onready var _body: Polygon2D = $Body
+@onready var _eye_l: Polygon2D = $EyeL
+@onready var _eye_r: Polygon2D = $EyeR
 @onready var _hp_bar: ColorRect = $HpBarBg/HpBar
 @onready var _hp_bar_bg: ColorRect = $HpBarBg
-
-const BASE_COLOR := Color(0.95, 0.45, 0.35, 1.0)
-const FLASH_COLOR := Color(1.0, 1.0, 1.0, 1.0)
-const DEAD_COLOR := Color(0.25, 0.2, 0.22, 1.0)
+@onready var _attack_box: Area2D = $EnemyAttackBox
 
 
 func _ready() -> void:
 	hp = max_hp
 	add_to_group("dummy")
 	_update_hp_bar()
+	if not hostile and _attack_box:
+		_attack_box.visible = false
+	_attack_timer = ATTACK_COOLDOWN
 
 
 func _physics_process(_delta: float) -> void:
 	if _flash_frames > 0:
 		_flash_frames -= 1
 		if _flash_frames == 0:
-			_body.color = BASE_COLOR if not _is_dead else DEAD_COLOR
+			_restore_color()
+
+	if _is_dead or not hostile:
+		return
+	_tick_attack()
 
 
-## 由命中盒调用
+# ============================================================
+# 攻击循环（hostile 形态）
+# ============================================================
+
+func _tick_attack() -> void:
+	# --- 前摇：明显的视觉预警 ---
+	if _windup_left > 0:
+		_windup_left -= 1
+		# 呼吸式放大，越接近出手越大
+		var t: float = 1.0 - float(_windup_left) / float(WINDUP_FRAMES)
+		_body.scale = Vector2(1.0 + 0.35 * t, 1.0 - 0.15 * t)
+		if _windup_left == 0:
+			_start_active()
+		return
+
+	# --- 有效帧 ---
+	if _active_left > 0:
+		_active_left -= 1
+		if _active_left == 0:
+			if _attack_box:
+				_attack_box.deactivate()
+			_recovery_left = RECOVERY_FRAMES
+		return
+
+	# --- 后摇 ---
+	if _recovery_left > 0:
+		_recovery_left -= 1
+		if _recovery_left == 0:
+			_body.scale = Vector2.ONE
+			_restore_color()
+			_attack_timer = ATTACK_COOLDOWN
+		return
+
+	# --- 冷却 ---
+	if _attack_timer > 0:
+		_attack_timer -= 1
+		if _attack_timer == 0:
+			_begin_windup()
+
+
+func _begin_windup() -> void:
+	_windup_left = WINDUP_FRAMES
+	_body.color = TELEGRAPH_COLOR
+	if _eye_l:
+		_eye_l.color = Color(0.5, 0.15, 0.05, 1)
+	if _eye_r:
+		_eye_r.color = Color(0.5, 0.15, 0.05, 1)
+
+
+func _start_active() -> void:
+	_active_left = ACTIVE_FRAMES
+	_body.color = Color(1.0, 0.25, 0.15, 1.0)
+	if _attack_box and _attack_box.has_method("activate"):
+		_attack_box.activate()
+
+
+# ============================================================
+# 受击
+# ============================================================
+
 func take_hit(damage: int, from_position: Vector2) -> void:
 	if _is_dead:
 		return
@@ -50,7 +139,6 @@ func take_hit(damage: int, from_position: Vector2) -> void:
 	_update_hp_bar()
 	_apply_hitstop_and_shake()
 
-	# 击退：朝远离攻击者的方向推一段，然后弹回
 	var dir: float = signf(global_position.x - from_position.x)
 	if is_zero_approx(dir):
 		dir = 1.0
@@ -63,14 +151,11 @@ func take_hit(damage: int, from_position: Vector2) -> void:
 
 
 func _apply_hitstop_and_shake() -> void:
-	# 从 GameTime 单例读取（autoload），顿帧与屏震都在那里统一管理
 	var gt := _game_time()
-	if gt == null:
-		return
 	var feel := _feel()
-	if feel == null:
+	if gt == null or feel == null:
 		return
-	var is_kill := hp == 0
+	var is_kill: bool = hp == 0
 	gt.request_hitstop(feel.hitstop_kill_frames if is_kill else feel.hitstop_hit_frames)
 	gt.request_shake(
 		feel.shake_kill_amplitude if is_kill else feel.shake_hit_amplitude,
@@ -92,11 +177,28 @@ func _update_hp_bar() -> void:
 	_hp_bar.color = Color(0.35, 0.9, 0.4) if ratio > 0.5 else (Color(0.95, 0.8, 0.3) if ratio > 0.25 else Color(0.9, 0.3, 0.3))
 
 
+func _restore_color() -> void:
+	if _is_dead:
+		_body.color = DEAD_COLOR
+	elif _windup_left > 0:
+		_body.color = TELEGRAPH_COLOR
+	elif _active_left > 0:
+		_body.color = Color(1.0, 0.25, 0.15, 1.0)
+	else:
+		_body.color = BASE_COLOR
+		if _eye_l:
+			_eye_l.color = Color(0.1, 0.05, 0.05, 1)
+		if _eye_r:
+			_eye_r.color = Color(0.1, 0.05, 0.05, 1)
+
+
 func _die() -> void:
 	_is_dead = true
 	_body.color = DEAD_COLOR
 	_hp_bar_bg.visible = false
-	# 死亡演出：压扁 + 变暗
+	if _attack_box and _attack_box.has_method("deactivate"):
+		_attack_box.deactivate()
+	_attack_timer = ATTACK_COOLDOWN
 	var tw := create_tween()
 	tw.set_parallel(true)
 	tw.tween_property(_body, "scale", Vector2(1.3, 0.25), 0.12)
@@ -104,15 +206,24 @@ func _die() -> void:
 	died.emit()
 
 
-## 复活（R 重生时由关卡调用）
 func revive() -> void:
 	_is_dead = false
 	hp = max_hp
 	_flash_frames = 0
-	_body.color = BASE_COLOR
+	_windup_left = 0
+	_active_left = 0
+	_recovery_left = 0
+	_attack_timer = ATTACK_COOLDOWN
 	_body.scale = Vector2.ONE
 	_body.modulate.a = 1.0
+	_body.color = BASE_COLOR
+	if _eye_l:
+		_eye_l.color = Color(0.1, 0.05, 0.05, 1)
+	if _eye_r:
+		_eye_r.color = Color(0.1, 0.05, 0.05, 1)
 	_hp_bar_bg.visible = true
+	if _attack_box and _attack_box.has_method("deactivate"):
+		_attack_box.deactivate()
 	_update_hp_bar()
 
 
@@ -120,7 +231,12 @@ func is_dead() -> bool:
 	return _is_dead
 
 
-# ---- 单例 / 配置查找（玩家会把自己的 FeelConfig 放进 group）----
+## 是否正在前摇（供测试断言使用）
+func is_telegraphing() -> bool:
+	return _windup_left > 0
+
+
+# ---- 单例 / 配置查找 ----
 
 func _game_time() -> Node:
 	return get_node_or_null("/root/GameTime")

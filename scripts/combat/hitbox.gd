@@ -9,6 +9,7 @@ extends Area2D
 signal hit_landed(target: Node2D, damage: int, knockback: float, is_kill: bool)
 
 ## 命中敌人所在物理层（见 project.godot 的 layer_names）
+## 敌人身体在 layer 3，对应 bit 值 1 << (3-1) = 4
 const ENEMY_LAYER := 3
 
 var _shape_node: CollisionShape2D
@@ -16,7 +17,7 @@ var _hit_this_swing: Array = []
 
 
 func _ready() -> void:
-	# 判定盒在敌人层上做「检测」，自身不参与被检测
+	# 判定盒自身不参与被检测，只做检测
 	collision_layer = 0
 	collision_mask = 1 << (ENEMY_LAYER - 1)
 	_shape_node = $CollisionShape2D
