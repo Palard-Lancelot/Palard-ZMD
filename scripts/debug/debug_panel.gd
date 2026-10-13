@@ -32,7 +32,9 @@ var _groups: Dictionary = {}       ## group_name -> VBoxContainer
 func _ready() -> void:
 	layer = 100
 	_build_ui()
-	visible = false
+	# debug 构建下默认展开：否则新手根本不知道有这个面板
+	# （正式导出后 is_debug_build() 为 false，默认隐藏）
+	visible = OS.is_debug_build()
 
 
 ## 由 boot.gd 调用：绑定手感配置并生成滑块
@@ -60,16 +62,21 @@ func _unhandled_input(event: InputEvent) -> void:
 # ============================================================
 
 func _build_ui() -> void:
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	margin.offset_left = -PANEL_WIDTH - 8.0
-	margin.offset_top = 8.0
-	margin.offset_right = -8.0
-	margin.offset_bottom = 8.0
-	add_child(margin)
-
+	# 直接把 PanelContainer 锚定到右侧。
+	# ⚠️ 不要用 MarginContainer + set_anchors_preset 做定位：
+	#    CanvasLayer 没有尺寸，锚点会解析为 0，面板会被放到屏幕外。
 	_root = PanelContainer.new()
-	margin.add_child(_root)
+	_root.anchor_left = 1.0
+	_root.anchor_right = 1.0
+	_root.anchor_top = 0.0
+	_root.anchor_bottom = 0.0
+	_root.offset_left = -PANEL_WIDTH - 8.0
+	_root.offset_right = -8.0
+	_root.offset_top = 8.0
+	_root.offset_bottom = 8.0
+	_root.grow_vertical = Control.GROW_DIRECTION_END
+	_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_root)
 
 	var outer := VBoxContainer.new()
 	outer.add_theme_constant_override("separation", 6)
