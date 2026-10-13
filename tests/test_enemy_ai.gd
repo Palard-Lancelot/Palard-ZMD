@@ -30,6 +30,11 @@ var _hp_min := 9999
 var _first_windup_frame := -1
 var _windup_frames_observed := 0
 
+## 逃跑场景采样
+var _flee_dist_start := 0.0
+var _flee_dist_after := 0.0
+var _flee_max_dist := 0.0
+
 
 func _physics_process(_d: float) -> bool:
 	if not _started:
@@ -60,11 +65,23 @@ func _physics_process(_d: float) -> bool:
 	var hp: int = _player.hp
 	_hp_min = mini(_hp_min, hp)
 
-	# 第 240 帧把玩家瞬移到远处，验证脱战回到 idle
+	# ---- 第 240 帧起：要求玩家持续逃离，验证追击速度足够 ----
 	if _frame == 240:
-		_player.position.x += 900.0
+		# 把玩家放回敌人右侧，并初始化逃跑采样
+		_player.position = Vector2(_rusher.position.x + 60.0, _rusher.position.y)
+		_player.velocity = Vector2.ZERO
+		_flee_dist_start = 60.0
+		_flee_max_dist = 60.0
+
+	if _frame > 240 and _frame <= 340:
+		Input.action_press("move_left")
+		_flee_max_dist = maxf(_flee_max_dist, dist)
+		if _frame == 340:
+			Input.action_release("move_left")
+			_flee_dist_after = dist
 
 	if _frame >= TOTAL_FRAMES:
+		Input.action_release("move_left")
 		_report()
 		return true
 	return false
@@ -111,6 +128,13 @@ func _report() -> void:
 		["前摇持续 >= 10 帧（支柱2 要求）", _windup_frames_observed >= 10],
 		["进入 attack 状态", _saw_attack],
 		["玩家最终掉血（-%d HP）" % damage, damage > 0],
+		# ⚠️ 回归守卫：曾出现"敌人追不上逃跑的玩家"——
+		#    敌人速度 78 对玩家 165，玩家一动就永远拉开距离，
+		#    体感是"敌人不追击"。这里断言逃跑时距离不能失控增长。
+		["玩家持续逃跑时距离未失控（60 → 最大 %.0f px）" % _flee_max_dist,
+			_flee_max_dist < 260.0],
+		["逃跑 100 帧后距离未持续拉大（%.0f px）" % _flee_dist_after,
+			_flee_dist_after < 260.0],
 	]
 
 	print("")
@@ -128,6 +152,8 @@ func _report() -> void:
 	print("[TEST] 距离: %.0f → 最近 %.0f" % [_dist_start, _dist_min])
 	print("[TEST] HP: %d → %d（最低）" % [_hp_start, _hp_min])
 	print("[TEST] 首次前摇帧: %d" % _first_windup_frame)
+	print("[TEST] 逃跑测试: 起始 %.0f → 最大 %.0f → 结束 %.0f" % [
+		_flee_dist_start, _flee_max_dist, _flee_dist_after])
 	print("[TEST] 结果: %d / %d 通过" % [passed, checks.size()])
 	if passed == checks.size():
 		print("[TEST] ★ 全部通过")

@@ -26,7 +26,14 @@ signal died
 @export var contact_damage: int = 10
 
 @export_group("移动")
-@export var move_speed: float = 70.0
+## 基础追击速度（px/s）。
+## ⚠️ 必须显著高于玩家的 max_run_speed * 0.6，否则玩家一走就永远追不上，
+##    表现为"敌人不追我"。玩家速度 165，所以追击速度至少 90 起。
+@export var move_speed: float = 95.0
+## 突进爆发速度：进入 lunge_range 后提速，制造"扑上来"的压迫感
+@export var lunge_speed: float = 135.0
+## 触发突进的距离
+@export var lunge_range: float = 95.0
 @export var gravity: float = 682.7
 @export var max_fall_speed: float = 700.0
 
@@ -164,12 +171,20 @@ func _tick_ai() -> void:
 			if _player_in_range(attack_range) and _attack_timer <= 0:
 				_enter(S_WINDUP)
 				return
-			velocity.x = facing * move_speed
+			# 两档速度：远距离基础追击，进入突进范围后提速
+			var spd: float = move_speed
+			if _player_in_range(lunge_range):
+				spd = lunge_speed
+			velocity.x = facing * spd
 
 		S_WINDUP:
 			_face_target()
+			# 前摇期间继续逼近 —— 给玩家"它正在扑过来"的压迫感
 			if move_during_windup:
-				velocity.x = facing * move_speed * windup_speed_mult
+				var w_spd: float = move_speed
+				if _player_in_range(lunge_range):
+					w_spd = lunge_speed
+				velocity.x = facing * w_spd * windup_speed_mult
 			else:
 				velocity.x = move_toward(velocity.x, 0.0, 600.0 * get_physics_process_delta_time())
 			if _sm.get_frame() >= windup_frames:

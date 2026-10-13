@@ -13,8 +13,13 @@ extends "res://scripts/enemies/enemy_base.gd"
 
 const RUSHER_HP := 24
 const RUSHER_DAMAGE := 10
-const RUSHER_SPEED := 78.0
-const RUSHER_DETECT := 150.0
+## ⚠️ 追击速度必须接近玩家速度（玩家 165），否则玩家一走就追不上，
+##    表现为"敌人不追击"。基础速度略低于玩家（可拉扯），
+##    突进爆发高于玩家（会被扑到）—— 这样才有攻防博弈。
+const RUSHER_CHASE_SPEED := 108.0
+const RUSHER_LUNGE_SPEED := 155.0
+const RUSHER_LUNGE_RANGE := 90.0
+const RUSHER_DETECT := 165.0
 const RUSHER_ATTACK_RANGE := 26.0
 const RUSHER_COOLDOWN := 55
 const RUSHER_WINDUP := 20
@@ -26,8 +31,10 @@ func _init() -> void:
 	# —— 属性 ——
 	max_hp = RUSHER_HP
 	contact_damage = RUSHER_DAMAGE
-	# —— 移动 ——
-	move_speed = RUSHER_SPEED
+	# —— 移动（两档速度）——
+	move_speed = RUSHER_CHASE_SPEED
+	lunge_speed = RUSHER_LUNGE_SPEED
+	lunge_range = RUSHER_LUNGE_RANGE
 	# —— 感知与攻击 ——
 	detect_range = RUSHER_DETECT
 	attack_range = RUSHER_ATTACK_RANGE
@@ -37,4 +44,4 @@ func _init() -> void:
 	recovery_frames = RUSHER_RECOVERY
 	# 前摇期间继续逼近 —— 制造压迫感
 	move_during_windup = true
-	windup_speed_mult = 0.45
+	windup_speed_mult = 0.5
