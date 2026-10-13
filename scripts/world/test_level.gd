@@ -13,19 +13,50 @@ const SPAWN_POSITION := Vector2(240, 0)
 ## 掉出这个高度以下就重生
 const DEATH_Y := 200.0
 
+## 隔离模式：环境变量 PALARD_ISOLATE=1 时**冻结**关卡内所有敌人的 AI。
+##
+## 为什么是"冻结"而不是"删除"：
+##   攻击测试需要一个可打的靶子（假人），但不需要敌人主动行动。
+##   删除会让靶子消失，攻击测试就没目标了。
+##   所以这里只关掉 AI 与攻击盒，敌人仍然可以被玩家攻击。
+const ISOLATE_ENV := "PALARD_ISOLATE"
+
 @onready var player: CharacterBody2D = $Player
 @onready var win_box: Area2D = $WinBox
 
 var _spawn: Vector2
 var _fell_count: int = 0
 var _cleared: bool = false
+var _isolated: bool = false
 
 
 func _ready() -> void:
 	_spawn = SPAWN_POSITION
 	player.position = _spawn
 	win_box.body_entered.connect(_on_win_box_entered)
-	print("[LEVEL] 灰盒测试场景就绪 —— 目标：踩到右上角紫色方块")
+
+	if OS.get_environment(ISOLATE_ENV) == "1":
+		_isolate_enemies()
+
+	print("[LEVEL] 灰盒测试场景就绪%s" % (
+		"（隔离模式：敌人 AI 已冻结）" if _isolated else " —— 目标：踩到最右侧紫色方块"))
+
+
+## 冻结所有敌人的 AI 与攻击盒（保留可被攻击的靶子）
+func _isolate_enemies() -> void:
+	_isolated = true
+	var count := 0
+	for group in ["dummy", "enemy"]:
+		for e in get_tree().get_nodes_in_group(group):
+			if not is_instance_valid(e) or e == player:
+				continue
+			e.set_physics_process(false)
+			e.set("hostile", false)
+			var ab := e.get_node_or_null("EnemyAttackBox")
+			if ab and ab.has_method("deactivate"):
+				ab.deactivate()
+			count += 1
+	print("[LEVEL] 已冻结 %d 个敌人的 AI" % count)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -53,10 +84,11 @@ func respawn() -> void:
 	player.velocity = Vector2.ZERO
 	if player.has_method("respawn"):
 		player.respawn()
-	# 复活所有假人，方便反复测试打击感
-	for d in get_tree().get_nodes_in_group("dummy"):
-		if d.has_method("revive"):
-			d.revive()
+	# 复活所有敌人（假人与冲锋兵都实现了 revive）
+	for group in ["dummy", "enemy"]:
+		for e in get_tree().get_nodes_in_group(group):
+			if e.has_method("revive"):
+				e.revive()
 	_cleared = false
 
 

@@ -18,6 +18,7 @@
 [ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="1_player"]
 [ext_resource type="Script" path="res://scripts/world/test_level.gd" id="2_level"]
 [ext_resource type="PackedScene" path="res://scenes/enemies/dummy.tscn" id="3_dummy"]
+[ext_resource type="PackedScene" path="res://scenes/enemies/rusher.tscn" id="4_rusher"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_ground"]
 size = Vector2(1320, 24)
@@ -316,6 +317,15 @@ max_hp = 40
 [node name="Dummy4" parent="." instance=ExtResource("3_dummy")]
 position = Vector2(1050, -80)
 max_hp = 60
+
+[node name="Rusher1" parent="." instance=ExtResource("4_rusher")]
+position = Vector2(380, 0)
+
+[node name="Rusher2" parent="." instance=ExtResource("4_rusher")]
+position = Vector2(780, 0)
+
+[node name="Rusher3" parent="." instance=ExtResource("4_rusher")]
+position = Vector2(700, -88)
 
 [node name="HUD" type="CanvasLayer" parent="."]
 layer = 50
