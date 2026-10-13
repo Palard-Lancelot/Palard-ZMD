@@ -26,7 +26,7 @@ func _ready() -> void:
 	_log("FeelConfig 已创建（%d 个可调参数）" % _count_tunable(feel))
 
 	debug_panel.bind(feel)
-	_log("调试面板已绑定 —— 按 F11 打开")
+	_log("调试面板已绑定 —— 按 F1 打开")
 
 	_print_feel_summary()
 	_print_validation()

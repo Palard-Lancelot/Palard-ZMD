@@ -11,8 +11,9 @@ extends CanvasLayer
 ##   - F11 开关面板。
 ##
 ## 快捷键：
-##   F11  显示 / 隐藏面板
+##   F1   显示 / 隐藏面板（对应 InputMap 动作 toggle_debug_panel）
 ##   F5   保存当前数值到 user://feel_config_saved.tres（方便固化到项目）
+##   R    全部重置为初始值
 
 const FeelConfigScript := preload("res://scripts/config/feel_config.gd")
 
@@ -88,7 +89,7 @@ func _build_ui() -> void:
 	outer.add_child(_status)
 
 	var keys := Label.new()
-	keys.text = "F11 开关 · F5 保存 · R 全部重置"
+	keys.text = "F1 开关 · F5 保存 · R 重置"
 	keys.add_theme_font_size_override("font_size", 9)
 	keys.modulate = Color(0.65, 0.65, 0.7)
 	outer.add_child(keys)
