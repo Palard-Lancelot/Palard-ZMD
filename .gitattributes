@@ -1,0 +1,42 @@
+# 统一换行符为 LF —— Godot 的 project.godot / .tscn / .tres 对换行敏感，
+# CRLF 会导致每次打开文件都显示"已修改"，污染 Git 历史。
+# 注意：gitattributes 是"后面的规则覆盖前面的"，所以二进制规则必须放最后。
+
+* text=auto eol=lf
+
+# 文本文件强制 LF
+*.gd       text eol=lf
+*.tscn     text eol=lf
+*.tres     text eol=lf
+*.godot    text eol=lf
+*.cfg      text eol=lf
+*.json     text eol=lf
+*.md       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.svg      text eol=lf
+*.gitignore  text eol=lf
+
+# 二进制文件（放最后，覆盖上面的 text=auto）
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.webp     binary
+*.gif      binary
+*.bmp      binary
+*.tga      binary
+*.ico      binary
+*.ttf      binary
+*.otf      binary
+*.woff     binary
+*.woff2    binary
+*.wav      binary
+*.ogg      binary
+*.mp3      binary
+*.flac     binary
+*.zip      binary
+*.pck      binary
+*.exe      binary
+*.dll      binary
+*.so       binary
+*.dylib    binary

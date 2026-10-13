@@ -1,0 +1,27 @@
+# Godot 4.4+ 在含 .gdignore 的目录中完全跳过文件扫描。
+# 必须放在最前面：否则 Godot 会尝试导入 .git 内部的对象文件。
+# 参考资料：Godot 官方 .gitignore 模板
+.gdignore
+
+# Godot 4+ 导入缓存与编辑器状态（必需，不要提交）
+.godot/
+
+# Godot 3 遗留目录（本项目用不到，保留以防误用）
+.import/
+
+# 导出产物
+export/
+build/
+*.translation
+
+# 导出配置：含本地路径与可能的密钥，不提交
+export_presets.cfg
+
+# 临时文件
+*.tmp
+*.translation
+
+# 操作系统垃圾文件
+Thumbs.db
+Desktop.ini
+.DS_Store
