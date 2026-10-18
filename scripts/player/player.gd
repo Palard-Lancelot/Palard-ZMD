@@ -12,6 +12,10 @@ extends CharacterBody2D
 
 const StateMachineScript := preload("res://scripts/player/state_machine.gd")
 
+## 玩家死亡时发出（阶段 0 任务 0.11 战斗闭环）。
+## 由关卡接收，进入"死亡 → 结算 → 重开"流程。
+signal died
+
 ## 由 test_level.gd 注入
 var feel: Resource = null
 
@@ -331,6 +335,7 @@ func take_damage(damage: int, from_position: Vector2) -> void:
 		velocity = Vector2(dir * feel.hurt_knockback * 4.0, -90.0)
 		_body_visual.color = Color(0.5, 0.25, 0.3, 1.0)
 		print("[PLAYER] ☠ 死亡")
+		died.emit()
 	else:
 		_sm.force_state(S_HURT)
 		print("[PLAYER] 受击 -%d HP → %d/%d" % [damage, hp, max_hp])
