@@ -60,6 +60,7 @@ size = Vector2(40, 8)
 script = ExtResource("2_level")
 
 [node name="Background" type="ColorRect" parent="."]
+z_index = -10
 offset_left = -300.0
 offset_top = -300.0
 offset_right = 1400.0

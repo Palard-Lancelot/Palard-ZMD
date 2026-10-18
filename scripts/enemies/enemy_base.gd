@@ -89,6 +89,14 @@ var _flash_frames: int = 0
 var _attack_timer: int = 0
 var _player: Node2D = null
 
+## 攻击可视化（阶段 0 可读性修复）
+## 这两块色块解决两个体感问题：
+##   1. 「出伤速度与画面不同步」—— 原来出伤时只有身体变色，没有挥砍动作
+##   2. 「攻击范围得靠自己猜」—— 原来判定盒完全不可见
+## 不需要美术资源，纯色块即可。
+var _telegraph_poly: Polygon2D     ## 前摇：覆盖真实判定范围的半透明提示
+var _slash_poly: Polygon2D         ## 出伤：明显的一记挥砍
+
 @onready var _body: Polygon2D = $Body
 @onready var _eye: Polygon2D = $Eye
 @onready var _hp_bar: ColorRect = $HpBarBg/HpBar
@@ -116,7 +124,51 @@ func _ready() -> void:
 	_update_hp_bar()
 	if _attack_box:
 		_attack_box.deactivate()
+	_build_attack_visuals()
 	_apply_facing()
+
+
+# ============================================================
+# 攻击可视化（可读性）
+# ============================================================
+
+## 用两个 Polygon2D 覆盖真实判定范围 —— 范围直接取自 CollisionShape2D，
+## 所以以后改攻击盒尺寸，提示会自动跟着变，不会出现"提示和实际不符"。
+func _build_attack_visuals() -> void:
+	_telegraph_poly = Polygon2D.new()
+	_telegraph_poly.name = "TelegraphVisual"
+	_telegraph_poly.color = Color(1.0, 0.7, 0.1, 0.22)
+	_telegraph_poly.visible = false
+	_telegraph_poly.z_index = -1
+	add_child(_telegraph_poly)
+
+	_slash_poly = Polygon2D.new()
+	_slash_poly.name = "SlashVisual"
+	_slash_poly.color = Color(1.0, 0.35, 0.15, 0.75)
+	_slash_poly.visible = false
+	add_child(_slash_poly)
+
+	_sync_attack_visuals()
+
+
+## 让可视化矩形与攻击盒的真实范围保持一致
+func _sync_attack_visuals() -> void:
+	if _attack_box == null:
+		return
+	var sh := _attack_box.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if sh == null or not (sh.shape is RectangleShape2D):
+		return
+	var size: Vector2 = (sh.shape as RectangleShape2D).size
+	var center: Vector2 = _attack_box.position + sh.position
+	var half := size * 0.5
+	var pts := PackedVector2Array([
+		center + Vector2(-half.x, -half.y),
+		center + Vector2( half.x, -half.y),
+		center + Vector2( half.x,  half.y),
+		center + Vector2(-half.x,  half.y),
+	])
+	_telegraph_poly.polygon = pts
+	_slash_poly.polygon = pts
 
 
 func _physics_process(delta: float) -> void:
@@ -187,6 +239,7 @@ func _tick_ai() -> void:
 				velocity.x = facing * w_spd * windup_speed_mult
 			else:
 				velocity.x = move_toward(velocity.x, 0.0, 600.0 * get_physics_process_delta_time())
+			_pulse_telegraph()
 			if _sm.get_frame() >= windup_frames:
 				_enter(S_ATTACK)
 
@@ -224,21 +277,91 @@ func _enter(next: StringName) -> void:
 
 	match next:
 		S_WINDUP:
+			# 前摇：身体变黄 + **显示攻击范围提示**
 			_body.color = TELEGRAPH_COLOR
 			_eye.color = Color(0.5, 0.15, 0.05, 1.0)
+			_show_telegraph(true)
 		S_ATTACK:
+			# 出伤：身体变红 + 隐藏范围提示 + **显示挥砍**
 			_body.color = ACTIVE_COLOR
+			_show_telegraph(false)
+			_show_slash(true)
+			_spawn_hit_spark()
 			if _attack_box:
 				_attack_box.activate()
 		S_RECOVER:
 			_body.color = BASE_COLOR
 			_eye.color = Color(0.1, 0.05, 0.05, 1.0)
+			_show_slash(false)
 		S_HURT:
-			pass
+			_show_telegraph(false)
+			_show_slash(false)
 		S_DEAD:
+			_show_telegraph(false)
+			_show_slash(false)
 			_die()
 
 	debug_state = str(next)
+
+
+## 前摇进度可视化：越接近出手越亮、越不透明 —— 
+## 玩家可以靠"变亮的进度"预判出手时机，而不是猜
+func _pulse_telegraph() -> void:
+	if _telegraph_poly == null or not _telegraph_poly.visible:
+		return
+	var total: int = maxi(windup_frames, 1)
+	var t: float = clampf(float(_sm.get_frame()) / float(total), 0.0, 1.0)
+	# 透明度 0.12 → 0.45，同时略微放大
+	_telegraph_poly.color.a = 0.22 + 0.33 * t
+	var s: float = 1.0 + 0.06 * t
+	_telegraph_poly.scale = Vector2(s, s)
+
+
+func _show_telegraph(v: bool) -> void:
+	if _telegraph_poly:
+		_telegraph_poly.visible = v
+		if v:
+			_telegraph_poly.color.a = 0.22
+			_telegraph_poly.scale = Vector2.ONE
+
+
+func _show_slash(v: bool) -> void:
+	if _slash_poly:
+		_slash_poly.visible = v
+		if v:
+			_slash_poly.color.a = 0.75
+			_slash_poly.scale = Vector2.ONE
+			# 挥砍的短促动画：迅速放大并淡出
+			var tw := create_tween()
+			tw.set_parallel(true)
+			tw.tween_property(_slash_poly, "scale", Vector2(1.15, 1.3), 0.10)
+			tw.tween_property(_slash_poly, "color:a", 0.0, 0.12)
+
+
+## 出伤瞬间的命中火花 —— 在攻击范围中心炸开一个短暂的亮色方块。
+## 这是"打中了 / 被打中了"的即时确认。
+func _spawn_hit_spark() -> void:
+	if _attack_box == null:
+		return
+	var sh := _attack_box.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if sh == null:
+		return
+	var center: Vector2 = _attack_box.position + sh.position
+
+	var spark := Polygon2D.new()
+	spark.color = Color(1.0, 0.95, 0.7, 0.9)
+	var s := 6.0
+	spark.polygon = PackedVector2Array([
+		Vector2(-s, -s), Vector2(s, -s), Vector2(s, s), Vector2(-s, s)
+	])
+	spark.position = center
+	add_child(spark)
+
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(spark, "scale", Vector2(3.0, 3.0), 0.10)
+	tw.tween_property(spark, "color:a", 0.0, 0.12)
+	tw.chain().tween_callback(spark.queue_free)
 
 
 # ============================================================
@@ -278,6 +401,8 @@ func _apply_facing() -> void:
 		var sh := _attack_box.get_node_or_null("CollisionShape2D") as CollisionShape2D
 		if sh:
 			sh.position.x = absf(sh.position.x) * facing
+	# 攻击可视化必须跟着攻击盒一起翻转，否则提示与实际判定不符
+	_sync_attack_visuals()
 
 
 # ============================================================

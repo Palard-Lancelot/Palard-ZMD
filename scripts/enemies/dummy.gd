@@ -61,6 +61,103 @@ func _ready() -> void:
 		_attack_box.visible = false
 	_attack_timer = ATTACK_COOLDOWN
 	_player = get_tree().get_first_node_in_group("player")
+	_build_attack_visuals()
+
+
+# ============================================================
+# 攻击可视化（可读性修复 —— 与 enemy_base.gd 同一套思路）
+#
+# 解决两个体感问题：
+#   1. 出伤速度与画面不同步：原来只有身体变色，没有挥砍
+#   2. 攻击范围靠猜：判定盒不可见
+# ============================================================
+
+var _telegraph_poly: Polygon2D
+var _slash_poly: Polygon2D
+
+
+func _build_attack_visuals() -> void:
+	if _attack_box == null:
+		return
+	_telegraph_poly = Polygon2D.new()
+	_telegraph_poly.name = "TelegraphVisual"
+	_telegraph_poly.color = Color(1.0, 0.7, 0.1, 0.22)
+	_telegraph_poly.visible = false
+	_telegraph_poly.z_index = -1
+	add_child(_telegraph_poly)
+
+	_slash_poly = Polygon2D.new()
+	_slash_poly.name = "SlashVisual"
+	_slash_poly.color = Color(1.0, 0.35, 0.15, 0.75)
+	_slash_poly.visible = false
+	add_child(_slash_poly)
+
+	_sync_attack_visuals()
+
+
+## 让可视化矩形与攻击盒真实范围一致（范围取自 CollisionShape2D，改尺寸会自动跟随）
+func _sync_attack_visuals() -> void:
+	if _attack_box == null or _telegraph_poly == null:
+		return
+	var sh := _attack_box.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if sh == null or not (sh.shape is RectangleShape2D):
+		return
+	var size: Vector2 = (sh.shape as RectangleShape2D).size
+	var center: Vector2 = _attack_box.position + sh.position
+	var half := size * 0.5
+	var pts := PackedVector2Array([
+		center + Vector2(-half.x, -half.y),
+		center + Vector2( half.x, -half.y),
+		center + Vector2( half.x,  half.y),
+		center + Vector2(-half.x,  half.y),
+	])
+	_telegraph_poly.polygon = pts
+	_slash_poly.polygon = pts
+
+
+func _show_telegraph(v: bool) -> void:
+	if _telegraph_poly:
+		_telegraph_poly.visible = v
+		if v:
+			_telegraph_poly.color.a = 0.22
+			_telegraph_poly.scale = Vector2.ONE
+
+
+func _show_slash(v: bool) -> void:
+	if _slash_poly:
+		_slash_poly.visible = v
+		if v:
+			_slash_poly.color.a = 0.75
+			_slash_poly.scale = Vector2.ONE
+			var tw := create_tween()
+			tw.set_parallel(true)
+			tw.tween_property(_slash_poly, "scale", Vector2(1.15, 1.3), 0.10)
+			tw.tween_property(_slash_poly, "color:a", 0.0, 0.12)
+
+
+## 出伤瞬间的命中火花
+func _spawn_hit_spark() -> void:
+	if _attack_box == null:
+		return
+	var sh := _attack_box.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if sh == null:
+		return
+	var center: Vector2 = _attack_box.position + sh.position
+
+	var spark := Polygon2D.new()
+	spark.color = Color(1.0, 0.95, 0.7, 0.9)
+	var s := 6.0
+	spark.polygon = PackedVector2Array([
+		Vector2(-s, -s), Vector2(s, -s), Vector2(s, s), Vector2(-s, s)
+	])
+	spark.position = center
+	add_child(spark)
+
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(spark, "scale", Vector2(3.0, 3.0), 0.10)
+	tw.tween_property(spark, "color:a", 0.0, 0.12)
+	tw.chain().tween_callback(spark.queue_free)
 
 
 func _physics_process(_delta: float) -> void:
@@ -79,12 +176,16 @@ func _physics_process(_delta: float) -> void:
 # ============================================================
 
 func _tick_attack() -> void:
-	# --- 前摇：明显的视觉预警 ---
+	# --- 前摇：明显的视觉预警 + 攻击范围提示 ---
 	if _windup_left > 0:
 		_windup_left -= 1
 		# 呼吸式放大，越接近出手越大
 		var t: float = 1.0 - float(_windup_left) / float(WINDUP_FRAMES)
 		_body.scale = Vector2(1.0 + 0.35 * t, 1.0 - 0.15 * t)
+		# 范围提示随进度变亮，让玩家能预判出手时机
+		if _telegraph_poly and _telegraph_poly.visible:
+			_telegraph_poly.color.a = 0.22 + 0.33 * t
+			_telegraph_poly.scale = Vector2(1.0 + 0.06 * t, 1.0 + 0.06 * t)
 		if _windup_left == 0:
 			_start_active()
 		return
@@ -95,6 +196,7 @@ func _tick_attack() -> void:
 		if _active_left == 0:
 			if _attack_box:
 				_attack_box.deactivate()
+			_show_slash(false)
 			_recovery_left = RECOVERY_FRAMES
 		return
 
@@ -122,8 +224,9 @@ func _begin_windup() -> void:
 		_eye_l.color = Color(0.5, 0.15, 0.05, 1)
 	if _eye_r:
 		_eye_r.color = Color(0.5, 0.15, 0.05, 1)
-	# 前摇期间就把攻击盒移到正确方向，让玩家能预判打击范围
+	# 前摇期间就把攻击盒移到正确方向，并显示攻击范围提示
 	_apply_facing()
+	_show_telegraph(true)
 
 
 ## 起手前摇时转向玩家。这是"攻击可被预判"的一部分 ——
@@ -150,11 +253,16 @@ func _apply_facing() -> void:
 		var shape_node := _attack_box.get_node_or_null("CollisionShape2D") as CollisionShape2D
 		if shape_node:
 			shape_node.position.x = 16.0 * _facing
+	# 攻击可视化跟随翻转，保证提示与实际判定一致
+	_sync_attack_visuals()
 
 
 func _start_active() -> void:
 	_active_left = ACTIVE_FRAMES
 	_body.color = Color(1.0, 0.25, 0.15, 1.0)
+	_show_telegraph(false)
+	_show_slash(true)
+	_spawn_hit_spark()
 	if _attack_box and _attack_box.has_method("activate"):
 		_attack_box.activate()
 
