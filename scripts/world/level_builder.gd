@@ -154,9 +154,12 @@ static func _build_floor(root: Node2D, origin: Vector2, has_below: bool, room_ro
 	if not has_below:
 		_add_solid(root, Vector2(origin.x + ROOM_W * 0.5, y), Vector2(ROOM_W, FLOOR_H))
 		return
-	var segs := _segments_with_gap(origin.x, ROOM_W, _down_gap_x(origin, room_row), V_SHAFT_W)
+	var gap_x := _down_gap_x(origin, room_row)
+	var segs := _segments_with_gap(origin.x, ROOM_W, gap_x, V_SHAFT_W)
 	for s in segs:
 		_add_solid(root, Vector2(s[0], y), Vector2(s[1], FLOOR_H))
+	# ⚠️ 这里**不画**通道标记：同一条边界会由下方房间的天花板再画一次，
+	#    两边都画会看到两组重叠箭头，很乱。统一由 _build_ceiling 画一次。
 
 
 ## 天花板：有上方房间时在上行洞位置开口
@@ -165,9 +168,62 @@ static func _build_ceiling(root: Node2D, origin: Vector2, has_above: bool, room_
 	if not has_above:
 		_add_solid(root, Vector2(origin.x + ROOM_W * 0.5, y), Vector2(ROOM_W, WALL_THICK))
 		return
-	var segs := _segments_with_gap(origin.x, ROOM_W, _up_gap_x(origin, room_row), V_SHAFT_W)
+	var gap_x := _up_gap_x(origin, room_row)
+	var segs := _segments_with_gap(origin.x, ROOM_W, gap_x, V_SHAFT_W)
 	for s in segs:
 		_add_solid(root, Vector2(s[0], y), Vector2(s[1], WALL_THICK))
+	_add_gap_marker(root, Vector2(gap_x, y))
+
+
+## 通道标记：让玩家一眼看出「这里是上下贯通的竖井」。
+##
+## ⚠️ 为什么需要：洞原本只是墙的缺口，在深色背景里几乎看不出来。
+##    用户反馈"跳不上去"，实际是**找不到洞在哪**。
+##
+## ⚠️ 为什么用双向菱形而不是单向箭头：
+##    同一条边界从上面看是"往下掉的口"，从下面看是"往上爬的口"。
+##    只画单向箭头会让站在另一边的人困惑（实测把↑画在地板上很误导）。
+##    菱形（上下两个三角对顶）= "上下都通"，没有歧义。
+static func _add_gap_marker(root: Node2D, center: Vector2) -> void:
+	var w := V_SHAFT_W
+	var h := 6.0
+
+	var band := Polygon2D.new()
+	band.name = "GapMarker"
+	band.color = Color(0.30, 0.95, 0.85, 0.22)
+	band.polygon = PackedVector2Array([
+		center + Vector2(-w * 0.5, -h * 0.5),
+		center + Vector2( w * 0.5, -h * 0.5),
+		center + Vector2( w * 0.5,  h * 0.5),
+		center + Vector2(-w * 0.5,  h * 0.5),
+	])
+	band.z_index = -1
+	root.add_child(band)
+
+	# 菱形：上三角 + 下三角对顶
+	for i in 3:
+		var t: float = (float(i) + 0.5) / 3.0
+		var ax: float = center.x - w * 0.5 + w * t
+		var r := 5.0
+		var up := Polygon2D.new()
+		up.color = Color(0.45, 1.0, 0.85, 0.55)
+		up.polygon = PackedVector2Array([
+			Vector2(ax - r, center.y - 3.0),
+			Vector2(ax + r, center.y - 3.0),
+			Vector2(ax, center.y - 11.0),
+		])
+		up.z_index = -1
+		root.add_child(up)
+
+		var dn := Polygon2D.new()
+		dn.color = Color(0.45, 1.0, 0.85, 0.55)
+		dn.polygon = PackedVector2Array([
+			Vector2(ax - r, center.y + 3.0),
+			Vector2(ax + r, center.y + 3.0),
+			Vector2(ax, center.y + 11.0),
+		])
+		dn.z_index = -1
+		root.add_child(dn)
 
 
 ## 攀爬台阶：沿**上行洞**的竖直通道交错放单向平台。
