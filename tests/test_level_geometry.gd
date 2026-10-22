@@ -101,17 +101,29 @@ func _run_probes(g: RefCounted) -> void:
 			_sc_edges += 1
 
 
-## 水平相邻：从 A 中心到 B 中心打垂直射线，在多个高度试，任一通过即可
+## 水平相邻：验证共享墙上确实留了门洞（= 玩家能走过去）。
+##
+## ⚠️ 为什么不再「房间中心 → 房间中心」打 6 个高度的射线：
+##    射线检测**不认 one_way_collision**，会把竖井攀爬台阶当成实心墙。
+##    原来探测高度是 30/60/90/120/150/180（相对地面），
+##    台阶间距调成 (204-23)/6 = 30.17px 之后，6 个高度和 6 级台阶几乎一一重合，
+##    于是 15 条水平边里有 6 条被**误判**成"被堵死"。
+##    （台阶是单向平台，玩家从下方可穿过、从上方可站立，本来就不该算墙。）
+##
+##    现在只测「玩家走路高度」：贴地 5/11/17px 三条射线。
+##    这个高度一定在门洞内（门洞高 90），也一定在最低一级台阶之下（最低台阶离地 25px）。
+##    三条都要通 —— 玩家身体高 22px，任何一条被挡都说明走不过去。
 func _probe_horizontal(space: PhysicsDirectSpaceState2D, ca: Vector2i, cb: Vector2i) -> bool:
-	var heights := [30.0, 60.0, 90.0, 120.0, 150.0, 180.0]
-	for h in heights:
-		var pa := Vector2(ca.x * ROOM_W + ROOM_W * 0.5, ca.y * ROOM_H + ROOM_H - FLOOR_H - h)
-		var pb := Vector2(cb.x * ROOM_W + ROOM_W * 0.5, cb.y * ROOM_H + ROOM_H - FLOOR_H - h)
-		var q := PhysicsRayQueryParameters2D.create(pa, pb)
+	var floor_y: float = float(ca.y) * ROOM_H + ROOM_H - FLOOR_H
+	var ax: float = float(ca.x) * ROOM_W + ROOM_W * 0.5
+	var bx: float = float(cb.x) * ROOM_W + ROOM_W * 0.5
+	for h in [5.0, 11.0, 17.0]:
+		var y: float = floor_y - h
+		var q := PhysicsRayQueryParameters2D.create(Vector2(ax, y), Vector2(bx, y))
 		q.collision_mask = 1
-		if space.intersect_ray(q).is_empty():
-			return true
-	return false
+		if not space.intersect_ray(q).is_empty():
+			return false
+	return true
 
 
 ## 垂直相邻：在共享边界高度打水平射线，检查**洞所在位置**是否真的空。

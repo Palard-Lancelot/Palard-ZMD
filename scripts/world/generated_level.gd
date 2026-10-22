@@ -14,6 +14,14 @@ const RoomGraphScript := preload("res://scripts/world/room_graph.gd")
 const LevelBuilder := preload("res://scripts/world/level_builder.gd")
 const RusherScene := preload("res://scenes/enemies/rusher.tscn")
 
+## 隔离模式：环境变量 PALARD_ISOLATE=1 时冻结所有敌人 AI。
+##
+## ⚠️ 为什么生成关卡也必须支持：几何类测试（垂直攀爬 / 关卡几何）要跑几十秒
+##    游戏时间，敌人是活的就会把玩家打死 —— 玩家一进 DEAD 状态就再也跳不起来，
+##    测试报出来的现象是"这一组完全没起跳"，看着像几何 bug，其实是战斗干扰。
+##    这类"测试环境本身引入了噪声"的坑，比被测代码的 bug 更难查。
+const ISOLATE_ENV := "PALARD_ISOLATE"
+
 ## 默认种子（可按 R 换一个）
 var seed_value: int = 12345
 
@@ -101,9 +109,28 @@ func _generate() -> void:
 	overlay.visible = false
 	_update_hud()
 
-	print("[GENLEVEL] 种子 %d  房间 %d  敌人 %d  入口→出口跨度 %d 格" % [
+	if OS.get_environment(ISOLATE_ENV) == "1":
+		_isolate_enemies()
+
+	print("[GENLEVEL] 种子 %d  房间 %d  敌人 %d  入口→出口跨度 %d 格%s" % [
 		seed_value, graph.rooms.size(), _total_enemies,
-		graph.stats.get("entrance_exit_dx", -1)])
+		graph.stats.get("entrance_exit_dx", -1),
+		"（隔离模式：敌人 AI 已冻结）" if OS.get_environment(ISOLATE_ENV) == "1" else ""])
+
+
+## 冻结所有敌人的 AI 与攻击盒（保留可被攻击的靶子）
+func _isolate_enemies() -> void:
+	var count := 0
+	for c in get_children():
+		if not c.is_in_group("generated_enemy") or not is_instance_valid(c):
+			continue
+		c.set_physics_process(false)
+		c.set("hostile", false)
+		var ab: Node = c.get_node_or_null("EnemyAttackBox")
+		if ab and ab.has_method("deactivate"):
+			ab.deactivate()
+		count += 1
+	print("[GENLEVEL] 已冻结 %d 个敌人的 AI" % count)
 
 
 # ============================================================

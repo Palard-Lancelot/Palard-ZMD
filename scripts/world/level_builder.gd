@@ -101,11 +101,12 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 # 现在的方案：**上行洞与下行洞在 X 方向错开**。
 #   上行洞在 center - SHIFT，下行洞在 center + SHIFT。
 #   这样玩家永远能站在「下行洞旁边」的实地上，从上行洞往上跳。
-const V_SHAFT_W := 120.0      ## 洞宽
+const V_SHAFT_W := 60.0       ## 洞宽。⚠️ 见下方「洞宽 = 难度」的算式，不要凭感觉调大
 const V_SHAFT_SHIFT := 80.0   ## 上行洞/下行洞相对房间中心的偏移（错开的关键）
-const LEDGE_W := 80.0
+const LEDGE_W := 44.0         ## 台阶宽。必须塞得进洞里（见算式）
 const LEDGE_H := 10.0
 const LEDGE_COUNT := 6        ## 台阶数：越多最后一段越短，越容易跳上去
+const TOP_LEDGE_Y := 23.0     ## 最高一级台阶的 y（相对房间原点）。算式见 _build_climb_ledges
 
 ## 某个"水平边界"上的洞的 x 坐标。
 ##
@@ -226,22 +227,63 @@ static func _add_gap_marker(root: Node2D, center: Vector2) -> void:
 		root.add_child(dn)
 
 
-## 攀爬台阶：沿**上行洞**的竖直通道交错放单向平台。
+## 攀爬台阶：沿**上行洞**的竖直通道放单向平台。
 ##
 ## ⚠️ 必须用 one_way_collision（单向碰撞）：
 ##    实心平台只能从侧面绕、不能从下方穿过 —— 玩家从下往上跳会撞头。
 ##    单向平台从下方可穿过、从上方可站立，是横板平台游戏的标准做法。
+##
+## ⚠️⚠️ 竖井能不能爬上去，**完全由三个数决定**。
+##    这三个数不能凭感觉调，必须按下面这套算式核一遍。
+##    （玩家碰撞盒 12x22，实测起跳上升 45px —— 理论 48px，
+##      被「可变跳跃高度」按 24/44 帧松开和离散积分吃掉 3px）
+##
+##   【算式 1】最高一级台阶能放多高？
+##     玩家站在台阶上，头顶会伸进「边界实心带」的纵向范围里
+##     （边界带 = 上层地板 16 + 下层天花板 12，跨 y -16..+12）。
+##     只要头顶还在洞里（洞比玩家宽）就不会撞，但台阶本身必须塞进洞里：
+##
+##       TOP_LEDGE_Y >= 玩家高 22          → 头顶不越过上层地板**底面**
+##       LEDGE_W/2 + 玩家宽/2 <= V_SHAFT_W/2   → 人站在台阶边缘也还在洞里
+##
+##   【算式 2】最后一跳的**余量**（这是最要命的数）
+##     上层房间可站立面 = -16（跨过边界后，上层地板的上表面）
+##     顶点脚底 = TOP_LEDGE_Y - 45
+##     余量     = -16 - (TOP_LEDGE_Y - 45) = 29 - TOP_LEDGE_Y
+##
+##     TOP_LEDGE_Y=30 → 余量 **-1px**（跳不到，脚底永远差一点）
+##     TOP_LEDGE_Y=24 → 余量 +5px
+##     TOP_LEDGE_Y=23 → 余量 +6px
+##
+##   【算式 3】玩家从洞里冒出来后，**横向够不够得着实地**？
+##     ⚠️ 这才是"跳到最高也过不去"的真正元凶。
+##     玩家从洞中央冒出来时，左右都是空的，必须先横move 到洞沿以外，
+##     才能踩到上层地板。可用的滞空时间由算式 2 的余量决定：
+##
+##       余量 6px → 越过上层地板表面的时间 ≈ 2*sqrt(2*6/682.7) = 0.265s
+##       空中加速 = 1650 * air_control(0.75) = 1237 px/s² → 0.13s 到满速
+##       0.265s 内水平位移 ≈ 33px
+##       需要位移 = V_SHAFT_W/2 - 玩家半宽 6
+##
+##       V_SHAFT_W=120 → 需要 54px > 33px  ✗ **永远差 21px，这是核心 bug**
+##       V_SHAFT_W=60  → 需要 24px < 33px  ✓ 余 9px
+##
+##    曾经洞宽 120（为了让玩家"看得见洞"），结果洞太宽反而爬不进去。
+##    可见性改由 _add_gap_marker 的青色标记负责，洞本身要窄。
+##
+##   【为什么不再左右交错】
+##     交错能增加路线变化，但会让玩家冒出的位置偏离洞中线、把算式 3 的
+##     余量吃掉。竖井攀爬的正确手感是「按住跳一路往上」，不需要之字形。
 static func _build_climb_ledges(root: Node2D, origin: Vector2, room_row: int) -> void:
 	var up_x: float = _up_gap_x(origin, room_row)
-	var floor_y: float = origin.y + ROOM_H - FLOOR_H
-	var step: float = (ROOM_H - FLOOR_H - WALL_THICK) / float(LEDGE_COUNT + 1)
+	var floor_y: float = origin.y + ROOM_H - FLOOR_H        # +204
+	var top_y: float = origin.y + TOP_LEDGE_Y               # +23
+	var step: float = (floor_y - top_y) / float(LEDGE_COUNT)
 
 	for i in LEDGE_COUNT:
 		var y: float = floor_y - step * float(i + 1)
-		# 在上行洞内左右交错，形成之字形攀爬路线
-		var side: float = -1.0 if i % 2 == 0 else 1.0
-		var x: float = up_x + side * (V_SHAFT_W * 0.5 - LEDGE_W * 0.5 - 6.0)
-		_add_solid(root, Vector2(x, y), Vector2(LEDGE_W, LEDGE_H), true)
+		# 竖直正对洞中线：玩家只需按住跳跃，不用左右找位置
+		_add_solid(root, Vector2(up_x, y), Vector2(LEDGE_W, LEDGE_H), true)
 
 
 ## 判断某格是否已被某个房间占据

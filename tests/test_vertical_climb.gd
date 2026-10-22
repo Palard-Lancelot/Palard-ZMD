@@ -3,13 +3,23 @@ extends SceneTree
 ##
 ## ⚠️ 存在的理由：**有洞 ≠ 爬得上**。
 ##
-## 背景：第一版攀爬台阶做成实心块，玩家从下往上跳会撞头。
-## 第二版改成单向平台，但只放了 4 级台阶 ——
-## 最高一级到天花板只剩 45.4px，跳跃高度 48px，余量仅 2.6px，
-## 被离散积分和可变跳跃的微小损失吃掉，玩家实际还是跳不上去。
+## 这个测试被同一类 bug 骗过两次，两次的教训必须记住：
 ##
-## 所以本测试**遍历所有垂直相邻房间**，逐个真的跳一遍。
-## 只测第一对会漏掉布局差异导致的失败。
+##   第一次：台阶做成实心块，玩家从下往上跳会撞头 —— 完全爬不上。
+##   第二次：单向平台但只放 4 级，最高一级到天花板只剩 45.4px（跳跃 48px），
+##           余量 2.6px 被离散积分吃掉，实际跳不上去。
+##
+##   第三次（最隐蔽）：判据写的是「攀升 >= ROOM_H * 0.85」。
+##           起点在下层地板 y=+204，0.85 层 = 187px → 只要到 y=+17 就算通过。
+##           而**上层房间的可站立面在 y=-16**！
+##           于是玩家爬到最高一级台阶（y=+39.6）、甚至只是蹦到 y=+17，
+##           就已经"通过测试"了 —— 但脚底**从未越过边界 y=0**，
+##           玩家在游戏里看到的就是"跳到最高也过不去"。
+##           **测试通过 ≠ 玩家上去了。判据必须量到玩家真正站在上层房间的地板上。**
+##
+## 现在的判据：`is_on_floor() 且 position.y < 边界 y`。
+##   这个判据与 Player 节点原点是脚底还是中心无关（-16 和 -27 都 < 0），
+##   而且 y < 0 只可能出现在上层房间里（0..12 的墙带是实心的，进不去）。
 ##
 ## 用法：
 ##   $env:DSH_SKIP_BOOT_QUIT = "1"
@@ -18,12 +28,14 @@ extends SceneTree
 const ROOM_W := 400.0
 const ROOM_H := 220.0
 const FLOOR_H := 16.0
+const V_SHAFT_SHIFT := 80.0
 
-const MAX_FRAMES := 420
+## 攀 6 级台阶 + 每次起跳 44 帧 → 至少 264 帧，再留横向找落点的余量。
+const MAX_FRAMES := 720
 ## ⚠️ 跳跃必须长按：可变跳跃高度会在松开时截断上升速度。
-##    实测只按 4 帧松开 → 只升 22px（应为 48px），会误判"爬不上去"。
+##    到顶点需要 22.5 帧，只按 4 帧 → 只升 22px（应为 47px），会误判"爬不上去"。
 const JUMP_PERIOD := 44
-const JUMP_HOLD := 20
+const JUMP_HOLD := 24
 
 var _level: Node2D = null
 var _player: CharacterBody2D = null
@@ -41,8 +53,10 @@ var _min_y := 999999.0
 var _target_pair := Vector2i.ZERO
 var _collected := false
 var _shaft_x := 0.0
-var _landed_y := 0.0
-var _landed_floor := false
+var _room_center_x := 0.0
+var _boundary_y := 0.0
+var _ever_upper_floor := false
+var _last_floor_y := 0.0
 
 
 func _physics_process(_d: float) -> bool:
@@ -84,8 +98,16 @@ func _physics_process(_d: float) -> bool:
 	elif phase == JUMP_HOLD:
 		Input.action_release("jump")
 
-	# 朝洞口方向移动（模拟玩家走向竖井）
-	var dx: float = _shaft_x - _player.position.x
+	# 横向操控：
+	#   还没穿过边界 → 朝竖井中线靠，沿着台阶往上爬；
+	#   **已经穿过边界 → 朝房间中心走，那里才是上层房间的实地。**
+	#   ⚠️ 这一条是"过不去"的最后一个坑：洞有 V_SHAFT_W 宽，
+	#      玩家从洞中央冒出来时，左右两侧各有一段空洞，
+	#      必须横move 到洞沿以外才能踩到上层地板。
+	var target_x: float = _shaft_x
+	if _player.position.y < _boundary_y:
+		target_x = _room_center_x
+	var dx: float = target_x - _player.position.x
 	if absf(dx) > 6.0:
 		if dx > 0.0:
 			Input.action_press("move_right")
@@ -99,15 +121,15 @@ func _physics_process(_d: float) -> bool:
 
 	_min_y = minf(_min_y, _player.position.y)
 	if _player.is_on_floor() and _player.velocity.y >= 0.0:
-		_landed_y = _player.position.y
-		_landed_floor = true
+		_last_floor_y = _player.position.y
+		# ★ 真正的通过条件：站在上层房间里
+		if _player.position.y < _boundary_y:
+			_ever_upper_floor = true
 
-	# 过关判定：攀升足够，或超时
-	var climbed: float = _start_y - _min_y
-	if climbed >= ROOM_H * 0.85:
-		_finish_pair(climbed, true)
+	if _ever_upper_floor:
+		_finish_pair(true)
 	elif _frame >= MAX_FRAMES:
-		_finish_pair(climbed, false)
+		_finish_pair(false)
 	return false
 
 
@@ -116,40 +138,44 @@ func _setup_pair(idx: int) -> void:
 	var lower: Vector2i = pair["lower"]
 	_target_pair = lower
 
-	# 上行洞位于房间中心 - V_SHAFT_SHIFT(70)。
-	# 玩家站在这个 x 的地面上（该处地板是实的，因为下行洞在 +70），
-	# 然后原地起跳穿过上行洞 —— 这就是真实的攀爬路线。
-	# 上行洞属于「本层与上一层的边界」，其位置由边界行号决定（逐行交替左右）：
+	# 上行洞属于「下层与上层的边界」，其位置由边界行号决定（逐行交替左右）：
 	#   boundary_row = lower.y - 1
 	#   sign = -1 若 boundary_row 为偶数，否则 +1
-	#   x = 房间中心 + sign * 70
-	var room_center: float = float(lower.x) * ROOM_W + ROOM_W * 0.5
+	#   x = 房间中心 + sign * V_SHAFT_SHIFT
+	_room_center_x = float(lower.x) * ROOM_W + ROOM_W * 0.5
+	_boundary_y = float(lower.y) * ROOM_H
 	var boundary_row: int = lower.y - 1
 	var sign: float = -1.0 if (boundary_row % 2 == 0) else 1.0
-	var shaft_x: float = room_center + sign * 80.0
+	_shaft_x = _room_center_x + sign * V_SHAFT_SHIFT
 	var floor_y: float = float(lower.y) * ROOM_H + ROOM_H - FLOOR_H
 
-	_player.position = Vector2(shaft_x, floor_y - 1.0)
+	# ⚠️ 必须先把玩家状态清干净：上一组若被敌人打伤/打死，
+	#    DEAD 状态会让玩家整组都不起跳，报出来像"几何 bug"。
+	if _player.has_method("respawn"):
+		_player.respawn()
+	_player.position = Vector2(_shaft_x, floor_y - 1.0)
 	_player.velocity = Vector2.ZERO
 	_player.set_physics_process(true)
 
-	_shaft_x = shaft_x
 	_start_y = _player.position.y
 	_min_y = _start_y
-	_landed_y = _start_y
-	_landed_floor = false
+	_last_floor_y = _start_y
+	_ever_upper_floor = false
 	Input.action_release("jump")
 	Input.action_release("move_left")
 	Input.action_release("move_right")
 
 
-func _finish_pair(climbed: float, ok: bool) -> void:
+func _finish_pair(ok: bool) -> void:
+	var climbed: float = _start_y - _min_y
+	# 顶点离"上层可站立面"还差多少：正数 = 越过了，负数 = 差多少够不到
+	var apex_above_upper_floor: float = (_boundary_y - FLOOR_H) - _min_y
 	_results.append({
 		"pair": _target_pair,
 		"climbed": climbed,
-		"landed_y": _landed_y,
-		"landed": _landed_floor and (_start_y - _landed_y) >= ROOM_H * 0.5,
-		"ok": _landed_floor and (_start_y - _landed_y) >= ROOM_H * 0.5,
+		"apex_gap": apex_above_upper_floor,
+		"landed_y": _last_floor_y,
+		"ok": ok,
 	})
 	Input.action_release("jump")
 	Input.action_release("move_left")
@@ -194,23 +220,24 @@ func _collect_pairs() -> void:
 func _report() -> void:
 	var total := _results.size()
 	var ok_count := 0
-	var worst := 99999.0
+	var worst_apex := 99999.0
 
 	if not _results.is_empty():
-		print("[TEST] 逐对结果:")
+		print("[TEST] 逐对结果（apex_gap 正数=脚底越过上层地板表面，负数=差多少）：")
 		for r in _results:
 			var mark := "[PASS]" if r["ok"] else "[FAIL]"
-			var landed_mark := "站稳" if r["landed"] else "掉回来"
-			print("[TEST]   %s 下层 %s  最高 %.0f px  %s  落脚 %.0f px" % [
-				mark, str(r["pair"]), r["climbed"], landed_mark,
+			var note := "站上层房间" if r["ok"] else "仍在下层"
+			print("[TEST]   %s 下层 %s  最高 +%.0f px  顶点余量 %+.1f px  %s  落脚 %.0f" % [
+				mark, str(r["pair"]), r["climbed"], r["apex_gap"], note,
 				float(r["landed_y"])])
 			if r["ok"]:
 				ok_count += 1
-			worst = minf(worst, r["climbed"])
+			worst_apex = minf(worst_apex, r["apex_gap"])
 
 	var checks: Array = [
 		["本层有垂直相邻房间（%d 组）" % total, total > 0],
-		["全部垂直通道可攀爬且站稳（%d/%d）" % [ok_count, total], ok_count == total and total > 0],
+		["全部垂直通道能真正站进上层房间（%d/%d）" % [ok_count, total],
+			ok_count == total and total > 0],
 	]
 
 	print("")
@@ -223,11 +250,11 @@ func _report() -> void:
 		print("[TEST]   %s %s" % ["[PASS]" if ok else "[FAIL]", c[0]])
 	print("[TEST] ---------------------------------------")
 	if total > 0:
-		print("[TEST] 最差攀升: %.0f px（需要 >= %.0f）" % [worst, ROOM_H * 0.85])
+		print("[TEST] 最差顶点余量: %+.1f px（需要 >= 0：脚底必须越过上层地板表面）" % worst_apex)
 	print("[TEST] 结果: %d / %d 通过" % [passed, checks.size()])
 	if passed == checks.size():
-		print("[TEST] ★ 全部垂直通道可攀爬")
+		print("[TEST] ★ 全部垂直通道可真正爬上上层房间")
 	else:
-		print("[TEST] ✗ 有通道爬不上去 —— 检查台阶数 / 间距 / 是否为单向碰撞")
+		print("[TEST] ✗ 有通道爬不进上层 —— 检查 level_builder 的 TOP_LEDGE_Y 与洞宽")
 	print("[TEST] =======================================")
 	quit(0 if passed == checks.size() else 1)
