@@ -64,11 +64,11 @@ func _register_game_time() -> void:
 		_log("相机已注册到 GameTime（屏震可用）")
 
 
-## 驱动 GameTime 每物理帧推进（必须在玩家之前，否则顿帧计数会晚一帧）
-func _physics_process(_delta: float) -> void:
-	var gt := get_node_or_null("/root/GameTime")
-	if gt:
-		gt.tick()
+# 注意：不要在这里手动调用 GameTime.tick()。
+# GameTime 是 autoload，已经自己在 _physics_process 里驱动 tick。
+# 之前在这里手动调 + autoload 自驱 = 双重递减，顿帧只有一半时长。
+# 而且一旦场景里没有 boot（如 generated_level），手动调用就消失了，
+# 导致顿帧永不结束 —— 这个 bug 曾让玩家第一次挨打后永久卡死。
 
 
 func _unhandled_input(event: InputEvent) -> void:

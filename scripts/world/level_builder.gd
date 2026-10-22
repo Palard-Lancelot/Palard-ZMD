@@ -57,28 +57,88 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		root.add_child(bg)
 
-	# --- 地面 + 天花板 ---
+	# --- 地面 / 天花板（垂直连接处留洞）---
 	for room in graph.rooms:
 		var origin := cell_to_world(room["cell"])
-		_add_solid(root, origin + Vector2(ROOM_W * 0.5, ROOM_H - FLOOR_H * 0.5),
-			Vector2(ROOM_W, FLOOR_H))
-		_add_solid(root, origin + Vector2(ROOM_W * 0.5, WALL_THICK * 0.5),
-			Vector2(ROOM_W, WALL_THICK))
+		var cell: Vector2i = room["cell"]
+		var has_below := _cell_occupied(graph, cell + Vector2i(0, 1)) >= 0
+		var has_above := _cell_occupied(graph, cell + Vector2i(0, -1)) >= 0
+
+		_build_floor(root, origin, has_below)
+		_build_ceiling(root, origin, has_above)
 
 	# --- 侧墙（有连接就留门洞）---
 	for room in graph.rooms:
 		var origin := cell_to_world(room["cell"])
-		var id: int = room["id"]
 		var cell: Vector2i = room["cell"]
 
-		# 左墙
-		var has_left := _has_neighbor_edge(graph, cell + Vector2i(-1, 0))
+		var has_left := _cell_occupied(graph, cell + Vector2i(-1, 0)) >= 0
 		_add_side_wall(root, origin, true, has_left)
-		# 右墙
-		var has_right := _has_neighbor_edge(graph, cell + Vector2i(1, 0))
+		var has_right := _cell_occupied(graph, cell + Vector2i(1, 0)) >= 0
 		_add_side_wall(root, origin, false, has_right)
 
+	# --- 垂直通道的攀爬台阶 ---
+	for room in graph.rooms:
+		var origin := cell_to_world(room["cell"])
+		var cell: Vector2i = room["cell"]
+		if _cell_occupied(graph, cell + Vector2i(0, -1)) >= 0:
+			_build_climb_ledges(root, origin)
+
 	return root
+
+
+# 垂直通道参数
+const V_SHAFT_W := 76.0       ## 地板/天花板的洞宽
+const LEDGE_W := 62.0
+const LEDGE_H := 10.0
+const LEDGE_COUNT := 4        ## 台阶数（220px 高 / 4 ≈ 55px 一级，跳跃 48px 够）
+
+## 地面：有下方房间时在中间留洞，让玩家能掉下去
+static func _build_floor(root: Node2D, origin: Vector2, has_below: bool) -> void:
+	var y: float = origin.y + ROOM_H - FLOOR_H * 0.5
+	if not has_below:
+		_add_solid(root, Vector2(origin.x + ROOM_W * 0.5, y), Vector2(ROOM_W, FLOOR_H))
+		return
+	# 中间留洞：左右各一段
+	var gap_l: float = origin.x + (ROOM_W - V_SHAFT_W) * 0.5
+	var gap_r: float = gap_l + V_SHAFT_W
+	var left_w: float = gap_l - origin.x
+	if left_w > 2.0:
+		_add_solid(root, Vector2(origin.x + left_w * 0.5, y), Vector2(left_w, FLOOR_H))
+	var right_w: float = (origin.x + ROOM_W) - gap_r
+	if right_w > 2.0:
+		_add_solid(root, Vector2(gap_r + right_w * 0.5, y), Vector2(right_w, FLOOR_H))
+
+
+## 天花板：有上方房间时在中间留洞
+static func _build_ceiling(root: Node2D, origin: Vector2, has_above: bool) -> void:
+	var y: float = origin.y + WALL_THICK * 0.5
+	if not has_above:
+		_add_solid(root, Vector2(origin.x + ROOM_W * 0.5, y), Vector2(ROOM_W, WALL_THICK))
+		return
+	var gap_l: float = origin.x + (ROOM_W - V_SHAFT_W) * 0.5
+	var gap_r: float = gap_l + V_SHAFT_W
+	var left_w: float = gap_l - origin.x
+	if left_w > 2.0:
+		_add_solid(root, Vector2(origin.x + left_w * 0.5, y), Vector2(left_w, WALL_THICK))
+	var right_w: float = (origin.x + ROOM_W) - gap_r
+	if right_w > 2.0:
+		_add_solid(root, Vector2(gap_r + right_w * 0.5, y), Vector2(right_w, WALL_THICK))
+
+
+## 攀爬台阶：在垂直通道里交错放几块小平台。
+## 玩家跳跃高度 48px，房间高 220 —— 4 级台阶（每级约 55px）刚好够爬。
+static func _build_climb_ledges(root: Node2D, origin: Vector2) -> void:
+	var center_x: float = origin.x + ROOM_W * 0.5
+	var floor_y: float = origin.y + ROOM_H - FLOOR_H
+	var step: float = (ROOM_H - FLOOR_H - WALL_THICK) / float(LEDGE_COUNT + 1)
+
+	for i in LEDGE_COUNT:
+		var y: float = floor_y - step * float(i + 1)
+		# 左右交错，形成之字形攀爬路线
+		var side: float = -1.0 if i % 2 == 0 else 1.0
+		var x: float = center_x + side * (V_SHAFT_W * 0.5 - LEDGE_W * 0.5 + 6.0)
+		_add_solid(root, Vector2(x, y), Vector2(LEDGE_W, LEDGE_H))
 
 
 ## 判断某格是否已被某个房间占据

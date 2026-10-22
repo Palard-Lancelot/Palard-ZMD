@@ -27,6 +27,19 @@ var total_hitstops: int = 0
 var total_shakes: int = 0
 
 
+## ⚠️ 自己驱动 tick，不依赖场景里有人调用。
+##
+## 曾经由 boot.gd 手动调用 gt.tick()，结果换到不带 boot.gd 的场景
+## （generated_level.tscn）后，顿帧计数永远不递减 →
+## is_frozen() 永久为 true → 实体每帧在第一行就 return →
+## **玩家第一次挨打后就永久卡在受击状态**。
+##
+## autoload 必须自驱动。执行顺序也正确：autoload 比场景节点先加入树，
+## 所以 _physics_process 先跑，实体的 is_frozen() 读到的是递减后的值。
+func _physics_process(_delta: float) -> void:
+	tick()
+
+
 func register_camera(cam: Camera2D) -> void:
 	camera = cam
 	if camera:
