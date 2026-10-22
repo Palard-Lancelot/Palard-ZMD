@@ -41,6 +41,8 @@ var _min_y := 999999.0
 var _target_pair := Vector2i.ZERO
 var _collected := false
 var _shaft_x := 0.0
+var _landed_y := 0.0
+var _landed_floor := false
 
 
 func _physics_process(_d: float) -> bool:
@@ -96,6 +98,9 @@ func _physics_process(_d: float) -> bool:
 		Input.action_release("move_right")
 
 	_min_y = minf(_min_y, _player.position.y)
+	if _player.is_on_floor() and _player.velocity.y >= 0.0:
+		_landed_y = _player.position.y
+		_landed_floor = true
 
 	# 过关判定：攀升足够，或超时
 	var climbed: float = _start_y - _min_y
@@ -121,7 +126,7 @@ func _setup_pair(idx: int) -> void:
 	var room_center: float = float(lower.x) * ROOM_W + ROOM_W * 0.5
 	var boundary_row: int = lower.y - 1
 	var sign: float = -1.0 if (boundary_row % 2 == 0) else 1.0
-	var shaft_x: float = room_center + sign * 70.0
+	var shaft_x: float = room_center + sign * 80.0
 	var floor_y: float = float(lower.y) * ROOM_H + ROOM_H - FLOOR_H
 
 	_player.position = Vector2(shaft_x, floor_y - 1.0)
@@ -131,6 +136,8 @@ func _setup_pair(idx: int) -> void:
 	_shaft_x = shaft_x
 	_start_y = _player.position.y
 	_min_y = _start_y
+	_landed_y = _start_y
+	_landed_floor = false
 	Input.action_release("jump")
 	Input.action_release("move_left")
 	Input.action_release("move_right")
@@ -140,7 +147,9 @@ func _finish_pair(climbed: float, ok: bool) -> void:
 	_results.append({
 		"pair": _target_pair,
 		"climbed": climbed,
-		"ok": ok,
+		"landed_y": _landed_y,
+		"landed": _landed_floor and (_start_y - _landed_y) >= ROOM_H * 0.5,
+		"ok": _landed_floor and (_start_y - _landed_y) >= ROOM_H * 0.5,
 	})
 	Input.action_release("jump")
 	Input.action_release("move_left")
@@ -191,15 +200,17 @@ func _report() -> void:
 		print("[TEST] 逐对结果:")
 		for r in _results:
 			var mark := "[PASS]" if r["ok"] else "[FAIL]"
-			print("[TEST]   %s 下层 %s  攀升 %.0f px" % [
-				mark, str(r["pair"]), r["climbed"]])
+			var landed_mark := "站稳" if r["landed"] else "掉回来"
+			print("[TEST]   %s 下层 %s  最高 %.0f px  %s  落脚 %.0f px" % [
+				mark, str(r["pair"]), r["climbed"], landed_mark,
+				float(r["landed_y"])])
 			if r["ok"]:
 				ok_count += 1
 			worst = minf(worst, r["climbed"])
 
 	var checks: Array = [
 		["本层有垂直相邻房间（%d 组）" % total, total > 0],
-		["全部垂直通道可攀爬（%d/%d）" % [ok_count, total], ok_count == total and total > 0],
+		["全部垂直通道可攀爬且站稳（%d/%d）" % [ok_count, total], ok_count == total and total > 0],
 	]
 
 	print("")

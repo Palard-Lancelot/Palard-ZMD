@@ -101,9 +101,9 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 # 现在的方案：**上行洞与下行洞在 X 方向错开**。
 #   上行洞在 center - SHIFT，下行洞在 center + SHIFT。
 #   这样玩家永远能站在「下行洞旁边」的实地上，从上行洞往上跳。
-const V_SHAFT_W := 100.0      ## 洞宽
-const V_SHAFT_SHIFT := 70.0   ## 上行洞/下行洞相对房间中心的偏移（错开的关键）
-const LEDGE_W := 50.0
+const V_SHAFT_W := 120.0      ## 洞宽
+const V_SHAFT_SHIFT := 80.0   ## 上行洞/下行洞相对房间中心的偏移（错开的关键）
+const LEDGE_W := 80.0
 const LEDGE_H := 10.0
 const LEDGE_COUNT := 6        ## 台阶数：越多最后一段越短，越容易跳上去
 

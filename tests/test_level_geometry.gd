@@ -128,7 +128,7 @@ func _probe_vertical(space: PhysicsDirectSpaceState2D, ca: Vector2i, cb: Vector2
 
 	var center_x: float = float(lower_cell.x) * ROOM_W + ROOM_W * 0.5
 	var sign: float = -1.0 if (boundary_row % 2 == 0) else 1.0
-	var gap_x: float = center_x + sign * 70.0    # V_SHAFT_SHIFT
+	var gap_x: float = center_x + sign * 80.0    # V_SHAFT_SHIFT
 
 	# 在洞中心水平打一条短射线（洞宽 100，射线跨度 40，必然在洞内）
 	var pa := Vector2(gap_x - 20.0, boundary_y)
