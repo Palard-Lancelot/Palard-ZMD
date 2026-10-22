@@ -126,8 +126,12 @@ static func _build_ceiling(root: Node2D, origin: Vector2, has_above: bool) -> vo
 		_add_solid(root, Vector2(gap_r + right_w * 0.5, y), Vector2(right_w, WALL_THICK))
 
 
-## 攀爬台阶：在垂直通道里交错放几块小平台。
-## 玩家跳跃高度 48px，房间高 220 —— 4 级台阶（每级约 55px）刚好够爬。
+## 攀爬台阶：在垂直通道里交错放几块**单向平台**。
+##
+## ⚠️ 关键：必须用 one_way_collision（单向碰撞）。
+##    第一版用的是实心块，玩家从下往上跳会**撞头**，永远爬不上去 ——
+##    实心平台只能从侧面绕，不能从下方穿过。
+##    单向平台是横板平台游戏的标准做法：从下方可穿过，从上方可站立。
 static func _build_climb_ledges(root: Node2D, origin: Vector2) -> void:
 	var center_x: float = origin.x + ROOM_W * 0.5
 	var floor_y: float = origin.y + ROOM_H - FLOOR_H
@@ -138,7 +142,7 @@ static func _build_climb_ledges(root: Node2D, origin: Vector2) -> void:
 		# 左右交错，形成之字形攀爬路线
 		var side: float = -1.0 if i % 2 == 0 else 1.0
 		var x: float = center_x + side * (V_SHAFT_W * 0.5 - LEDGE_W * 0.5 + 6.0)
-		_add_solid(root, Vector2(x, y), Vector2(LEDGE_W, LEDGE_H))
+		_add_solid(root, Vector2(x, y), Vector2(LEDGE_W, LEDGE_H), true)
 
 
 ## 判断某格是否已被某个房间占据
@@ -178,7 +182,10 @@ static func _add_side_wall(root: Node2D, origin: Vector2, is_left: bool, has_doo
 
 
 ## 加一块实心几何（碰撞 + 可视）
-static func _add_solid(root: Node2D, center: Vector2, size: Vector2) -> void:
+## one_way = true 时启用单向碰撞：从下方可穿过，从上方可站立。
+## ⚠️ 单向平台必须配合 CharacterBody2D 的「上落」判定；
+##    Godot 的 one_way_collision 默认允许从形状背面穿过。
+static func _add_solid(root: Node2D, center: Vector2, size: Vector2, one_way: bool = false) -> void:
 	var body := StaticBody2D.new()
 	body.collision_layer = 1
 	body.collision_mask = 0
@@ -188,10 +195,13 @@ static func _add_solid(root: Node2D, center: Vector2, size: Vector2) -> void:
 	var rect := RectangleShape2D.new()
 	rect.size = size
 	shape.shape = rect
+	if one_way:
+		shape.one_way_collision = true
 	body.add_child(shape)
 
 	var vis := ColorRect.new()
-	vis.color = WALL_COLOR
+	# 单向平台用略亮的颜色，与实心墙区分开（可读性）
+	vis.color = Color(0.42, 0.50, 0.60, 1) if one_way else WALL_COLOR
 	vis.position = -size * 0.5
 	vis.size = size
 	vis.mouse_filter = Control.MOUSE_FILTER_IGNORE
