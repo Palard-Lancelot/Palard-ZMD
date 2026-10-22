@@ -114,23 +114,28 @@ func _probe_horizontal(space: PhysicsDirectSpaceState2D, ca: Vector2i, cb: Vecto
 	return false
 
 
-## 垂直相邻：在共享边界高度打水平射线，检查中间有没有洞
+## 垂直相邻：在共享边界高度打水平射线，检查**洞所在位置**是否真的空。
+##
+## ⚠️ 洞的位置由「边界行号」决定并逐行交替左右（见 level_builder._gap_x_for_row）。
+##    不能在房间中心探测 —— 中心很可能是实心的，会得到假阳性/假阴性。
 func _probe_vertical(space: PhysicsDirectSpaceState2D, ca: Vector2i, cb: Vector2i) -> bool:
-	# 共享边界 y：取较低房间的顶部
 	var lower_cell := ca if ca.y > cb.y else cb
-	var boundary_y: float = float(lower_cell.y) * ROOM_H + 2.0
+	var upper_cell := ca if ca.y < cb.y else cb
 
-	# 在边界处水平扫描，看中点附近是否有空白
-	# 用短射线从中心左侧 20px 打到右侧 20px
+	# 共享边界行号 = 上层房间所在行
+	var boundary_row: int = upper_cell.y
+	var boundary_y: float = float(boundary_row + 1) * ROOM_H + 2.0
+
 	var center_x: float = float(lower_cell.x) * ROOM_W + ROOM_W * 0.5
-	for dx in [-18.0, -8.0, 0.0, 8.0, 18.0]:
-		var pa := Vector2(center_x + dx - 6.0, boundary_y)
-		var pb := Vector2(center_x + dx + 6.0, boundary_y)
-		var q := PhysicsRayQueryParameters2D.create(pa, pb)
-		q.collision_mask = 1
-		if space.intersect_ray(q).is_empty():
-			return true
-	return false
+	var sign: float = -1.0 if (boundary_row % 2 == 0) else 1.0
+	var gap_x: float = center_x + sign * 70.0    # V_SHAFT_SHIFT
+
+	# 在洞中心水平打一条短射线（洞宽 100，射线跨度 40，必然在洞内）
+	var pa := Vector2(gap_x - 20.0, boundary_y)
+	var pb := Vector2(gap_x + 20.0, boundary_y)
+	var q := PhysicsRayQueryParameters2D.create(pa, pb)
+	q.collision_mask = 1
+	return space.intersect_ray(q).is_empty()
 
 
 func _report() -> void:

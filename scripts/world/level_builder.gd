@@ -64,8 +64,8 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 		var has_below := _cell_occupied(graph, cell + Vector2i(0, 1)) >= 0
 		var has_above := _cell_occupied(graph, cell + Vector2i(0, -1)) >= 0
 
-		_build_floor(root, origin, has_below)
-		_build_ceiling(root, origin, has_above)
+		_build_floor(root, origin, has_below, cell.y)
+		_build_ceiling(root, origin, has_above, cell.y)
 
 	# --- 侧墙（有连接就留门洞）---
 	for room in graph.rooms:
@@ -82,66 +82,109 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 		var origin := cell_to_world(room["cell"])
 		var cell: Vector2i = room["cell"]
 		if _cell_occupied(graph, cell + Vector2i(0, -1)) >= 0:
-			_build_climb_ledges(root, origin)
+			_build_climb_ledges(root, origin, cell.y)
 
 	return root
 
 
 # 垂直通道参数
-const V_SHAFT_W := 76.0       ## 地板/天花板的洞宽
-const LEDGE_W := 62.0
+#
+# ⚠️ 这些数值经过实测调过，改之前务必跑 tests/test_vertical_climb.gd。
+#
+# 演进过程（每一步都是被测试逼出来的）：
+#   1. 台阶用实心块 → 玩家撞头，完全爬不上去
+#   2. 改成单向平台，但 4 级台阶 → 最高一级到天花板只剩 45.4px（跳跃 48px），
+#      余量 2.6px 被离散积分吃掉，实际还是跳不上去
+#   3. **上下两个洞都开在正中 → 下方有房间时，玩家走到洞口就掉下去，
+#      根本没有站立点起跳。7 组垂直通道只有 3 组（底层）能爬**
+#
+# 现在的方案：**上行洞与下行洞在 X 方向错开**。
+#   上行洞在 center - SHIFT，下行洞在 center + SHIFT。
+#   这样玩家永远能站在「下行洞旁边」的实地上，从上行洞往上跳。
+const V_SHAFT_W := 100.0      ## 洞宽
+const V_SHAFT_SHIFT := 70.0   ## 上行洞/下行洞相对房间中心的偏移（错开的关键）
+const LEDGE_W := 50.0
 const LEDGE_H := 10.0
-const LEDGE_COUNT := 4        ## 台阶数（220px 高 / 4 ≈ 55px 一级，跳跃 48px 够）
+const LEDGE_COUNT := 6        ## 台阶数：越多最后一段越短，越容易跳上去
 
-## 地面：有下方房间时在中间留洞，让玩家能掉下去
-static func _build_floor(root: Node2D, origin: Vector2, has_below: bool) -> void:
+## 某个"水平边界"上的洞的 x 坐标。
+##
+## ⚠️ 洞属于**边界**，不属于房间 —— 上下两个相邻房间共享同一个洞。
+##    曾经让"上行洞"和"下行洞"各自按房间中心偏移：
+##      A 房(y=4) 的下行洞在 center+70、B 房(y=5) 的上行洞在 center-70，
+##      两者错位 → 玩家在 930 往上爬，撞到 A 房在 1070 之外的实心地板。
+##      实测 7 组垂直通道全部卡在 181px（差一点进不去）。
+##
+##    现在改为：洞的位置只由**边界所在行号**决定，且逐行交替左右。
+##    这样既能保证上下房间的洞严格对齐，
+##    又能让同一个房间的上洞和下洞错开（否则玩家会一口气从顶层掉到底）。
+static func _gap_x_for_row(origin: Vector2, boundary_row: int) -> float:
+	var center: float = origin.x + ROOM_W * 0.5
+	var sign: float = -1.0 if (boundary_row % 2 == 0) else 1.0
+	return center + sign * V_SHAFT_SHIFT
+
+
+## 房间的**上行洞**（通往上一层）x 坐标：属于本层与上一层的边界
+static func _up_gap_x(origin: Vector2, room_row: int) -> float:
+	return _gap_x_for_row(origin, room_row - 1)
+
+
+## 房间的**下行洞**（通往下一层）x 坐标：属于本层与下一层的边界
+static func _down_gap_x(origin: Vector2, room_row: int) -> float:
+	return _gap_x_for_row(origin, room_row)
+
+
+## 在一条水平实心带上开一个洞：返回 [左段, 右段]（可能为空）
+static func _segments_with_gap(origin_x: float, width: float, gap_x: float, gap_w: float) -> Array:
+	var segs: Array = []
+	var gap_l: float = gap_x - gap_w * 0.5
+	var gap_r: float = gap_x + gap_w * 0.5
+	var left_w: float = gap_l - origin_x
+	if left_w > 2.0:
+		segs.append([origin_x + left_w * 0.5, left_w])
+	var right_w: float = (origin_x + width) - gap_r
+	if right_w > 2.0:
+		segs.append([gap_r + right_w * 0.5, right_w])
+	return segs
+
+
+## 地面：有下方房间时在下行洞位置开口
+static func _build_floor(root: Node2D, origin: Vector2, has_below: bool, room_row: int) -> void:
 	var y: float = origin.y + ROOM_H - FLOOR_H * 0.5
 	if not has_below:
 		_add_solid(root, Vector2(origin.x + ROOM_W * 0.5, y), Vector2(ROOM_W, FLOOR_H))
 		return
-	# 中间留洞：左右各一段
-	var gap_l: float = origin.x + (ROOM_W - V_SHAFT_W) * 0.5
-	var gap_r: float = gap_l + V_SHAFT_W
-	var left_w: float = gap_l - origin.x
-	if left_w > 2.0:
-		_add_solid(root, Vector2(origin.x + left_w * 0.5, y), Vector2(left_w, FLOOR_H))
-	var right_w: float = (origin.x + ROOM_W) - gap_r
-	if right_w > 2.0:
-		_add_solid(root, Vector2(gap_r + right_w * 0.5, y), Vector2(right_w, FLOOR_H))
+	var segs := _segments_with_gap(origin.x, ROOM_W, _down_gap_x(origin, room_row), V_SHAFT_W)
+	for s in segs:
+		_add_solid(root, Vector2(s[0], y), Vector2(s[1], FLOOR_H))
 
 
-## 天花板：有上方房间时在中间留洞
-static func _build_ceiling(root: Node2D, origin: Vector2, has_above: bool) -> void:
+## 天花板：有上方房间时在上行洞位置开口
+static func _build_ceiling(root: Node2D, origin: Vector2, has_above: bool, room_row: int) -> void:
 	var y: float = origin.y + WALL_THICK * 0.5
 	if not has_above:
 		_add_solid(root, Vector2(origin.x + ROOM_W * 0.5, y), Vector2(ROOM_W, WALL_THICK))
 		return
-	var gap_l: float = origin.x + (ROOM_W - V_SHAFT_W) * 0.5
-	var gap_r: float = gap_l + V_SHAFT_W
-	var left_w: float = gap_l - origin.x
-	if left_w > 2.0:
-		_add_solid(root, Vector2(origin.x + left_w * 0.5, y), Vector2(left_w, WALL_THICK))
-	var right_w: float = (origin.x + ROOM_W) - gap_r
-	if right_w > 2.0:
-		_add_solid(root, Vector2(gap_r + right_w * 0.5, y), Vector2(right_w, WALL_THICK))
+	var segs := _segments_with_gap(origin.x, ROOM_W, _up_gap_x(origin, room_row), V_SHAFT_W)
+	for s in segs:
+		_add_solid(root, Vector2(s[0], y), Vector2(s[1], WALL_THICK))
 
 
-## 攀爬台阶：在垂直通道里交错放几块**单向平台**。
+## 攀爬台阶：沿**上行洞**的竖直通道交错放单向平台。
 ##
-## ⚠️ 关键：必须用 one_way_collision（单向碰撞）。
-##    第一版用的是实心块，玩家从下往上跳会**撞头**，永远爬不上去 ——
-##    实心平台只能从侧面绕，不能从下方穿过。
-##    单向平台是横板平台游戏的标准做法：从下方可穿过，从上方可站立。
-static func _build_climb_ledges(root: Node2D, origin: Vector2) -> void:
-	var center_x: float = origin.x + ROOM_W * 0.5
+## ⚠️ 必须用 one_way_collision（单向碰撞）：
+##    实心平台只能从侧面绕、不能从下方穿过 —— 玩家从下往上跳会撞头。
+##    单向平台从下方可穿过、从上方可站立，是横板平台游戏的标准做法。
+static func _build_climb_ledges(root: Node2D, origin: Vector2, room_row: int) -> void:
+	var up_x: float = _up_gap_x(origin, room_row)
 	var floor_y: float = origin.y + ROOM_H - FLOOR_H
 	var step: float = (ROOM_H - FLOOR_H - WALL_THICK) / float(LEDGE_COUNT + 1)
 
 	for i in LEDGE_COUNT:
 		var y: float = floor_y - step * float(i + 1)
-		# 左右交错，形成之字形攀爬路线
+		# 在上行洞内左右交错，形成之字形攀爬路线
 		var side: float = -1.0 if i % 2 == 0 else 1.0
-		var x: float = center_x + side * (V_SHAFT_W * 0.5 - LEDGE_W * 0.5 + 6.0)
+		var x: float = up_x + side * (V_SHAFT_W * 0.5 - LEDGE_W * 0.5 - 6.0)
 		_add_solid(root, Vector2(x, y), Vector2(LEDGE_W, LEDGE_H), true)
 
 
