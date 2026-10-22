@@ -1,0 +1,88 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/generated_level.gd" id="1_gen"]
+[ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="2_player"]
+[ext_resource type="PackedScene" path="res://scenes/debug/debug_panel.tscn" id="3_debug"]
+
+[node name="GeneratedLevel" type="Node2D"]
+script = ExtResource("1_gen")
+
+[node name="Player" parent="." instance=ExtResource("2_player")]
+position = Vector2(200, 100)
+
+[node name="DebugPanel" parent="." instance=ExtResource("3_debug")]
+
+[node name="HUD" type="CanvasLayer" parent="."]
+layer = 50
+
+[node name="Hint" type="Label" parent="HUD"]
+offset_left = 10.0
+offset_top = 8.0
+offset_right = 460.0
+offset_bottom = 30.0
+text = "A/D 移动 · Space 跳 · J 攻击 · L 冲刺 · R 换一层 · F1 调参"
+theme_override_colors/font_color = Color(0.75, 0.8, 0.9, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 10
+
+[node name="KillCounter" type="Label" parent="HUD"]
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -150.0
+offset_top = 8.0
+offset_right = -12.0
+offset_bottom = 30.0
+text = "击杀 0 / 0"
+horizontal_alignment = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.45, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.85)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 12
+
+[node name="Overlay" type="Control" parent="HUD"]
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Dim" type="ColorRect" parent="HUD/Overlay"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.55)
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="HUD/Overlay"]
+anchor_left = 0.5
+anchor_right = 0.5
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -46.0
+offset_right = 200.0
+offset_bottom = -6.0
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 26
+
+[node name="Hint" type="Label" parent="HUD/Overlay"]
+anchor_left = 0.5
+anchor_right = 0.5
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = 2.0
+offset_right = 200.0
+offset_bottom = 30.0
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_color = Color(0.8, 0.82, 0.9, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 12
