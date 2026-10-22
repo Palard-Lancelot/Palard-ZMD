@@ -86,7 +86,10 @@ func _generate() -> void:
 			continue
 		var center: Vector2 = LevelBuilder.room_center(graph, room["id"])
 		var e := RusherScene.instantiate()
-		e.position = center + Vector2(60.0, 0.0)
+		# ⚠️ 刷在房间中央，不要偏移。
+		#    竖井位于 room_center ± 80，之前刷在 +60 会**正好卡在竖井口**，
+		#    玩家爬上来的第一时间就被打，看起来像"跳不上去"。
+		e.position = center
 		e.add_to_group("generated_enemy")
 		add_child(e)
 		if e.has_signal("died"):
