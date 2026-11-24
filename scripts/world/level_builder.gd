@@ -93,8 +93,11 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 			_build_climb_ledges(root, origin, cell)
 
 	# --- 房间内部层次（v1.4）：让每间房不再是一个空盒子 ---
+	# ⚠️ 有上方房间的房间已经有"攀爬阶梯"，不再叠内部平台（会互相穿插）
 	for room in graph.rooms:
-		_build_room_interior(root, cell_to_world(room["cell"]), room["cell"], room["type"])
+		var c: Vector2i = room["cell"]
+		var has_climb: bool = _cell_occupied(graph, c + Vector2i(0, -1)) >= 0
+		_build_room_interior(root, cell_to_world(c), c, room["type"], has_climb)
 
 	return root
 
@@ -123,17 +126,30 @@ const SHAFT_CLEARANCE := 45.0 ## 房间内部结构必须离竖井中线这么�
 const LEDGE_W_MIN := 36.0     ## 台阶宽下限（v1.3 起在 MIN–MAX 之间随机）
 const LEDGE_W_MAX := 46.0     ## 上限。算式1：LEDGE_W/2 + 玩家半宽 6 <= V_SHAFT_W/2 = 30 → 必须 <= 48
 const LEDGE_H := 10.0
-const LEDGE_COUNT_MIN := 5    ## 级数下限。4 级时平均级距 45.25px > 实测起跳 45px
-const LEDGE_COUNT_MAX := 8    ## 级数上限（v1.4 改不等距后自然落在 5–8）
-const LEDGE_GAP_MIN := 18.0   ## 相邻两级的最小垂直间距（v1.4：不再等距）
-const LEDGE_GAP_MAX := 38.0   ## 最大垂直间距。必须 < 实测起跳 45px，留 7px 余量
-## 最低一级离地面的**最小**高度。必须 > 玩家身高 22px（+余量）：
-## 否则玩家站在地面上时身体会和台阶重叠（台阶是单向平台，走过去会"穿胸"），
-## 而且贴着地面的台阶会被"走路高度"的射线当成墙（test_level_geometry 5/11/17px）。
-const LEDGE_FIRST_GAP_MIN := 32.0
-const LEDGE_MAX_STEP_X := 10.0 ## 相邻两级的水平错位上限（再大就跳不过去）
-const TOP_LEDGE_Y := 23.0     ## 最高一级台阶的 y（相对房间原点）。算式见 _build_climb_ledges
+## 发射台 y（相对房间原点）。
+## ⚠️ 值越小 = 离洞越近 = 越过边界后的**高度余量越大**（余量 = 29 - 该值）。
+##    23 时余量仅 6px → 出洞后可用的滞空时间太短（0.265s，横向约 33px），
+##    实测差 24px 够不着上层地板、会从洞里掉回去。18 → 余量 11px、横向预算 46px。
+##    代价：玩家站在发射台上时头顶会伸进上层地板带，但发射台在**洞内**，不会撞。
+const TOP_LEDGE_Y := 18.0
 const PLAT_H_INNER := 8.0     ## 房间内部平台厚度
+
+# ---- 攀爬阶梯（v1.5：对标手写层的 A→B→C 斜向阶梯）----
+#
+# 手写层实测几何：每级抬 34–36px、横向拉开 110px、台宽 48–64。
+# 物理依据（玩家 165px/s、起跳 45px）：
+#   台间**边缘**距离必须在 ~48–66px：
+#     < 40px → 起跳时还在低处，会撞下一级台子的底面（算过 30px 时只升 35px）
+#     > 80px → 滞空不够，落不到
+#   垂直每级 <= 40px（起跳 45，留 5px 余量）
+const CLIMB_HOPS := 4                  ## 阶梯平台数（不含最上面的发射台）
+const CLIMB_BOTTOM_Y_MIN := 166.0      ## 底级 y：离地 38px（起跳 45，留余量）
+const CLIMB_BOTTOM_Y_MAX := 172.0      ## 离地 32px
+const CLIMB_DX_MIN := 104.0            ## 相邻两级的中心水平距（边缘距 ≈ 减去 56）
+const CLIMB_DX_MAX := 122.0
+const CLIMB_PLAT_W_MIN := 48.0         ## 台宽（与手写层一致）
+const CLIMB_PLAT_W_MAX := 64.0
+const LAUNCH_W := 44.0                 ## 发射台宽度：必须塞进 60 宽的洞
 
 ## 某个"水平边界"上的洞的 x 坐标。
 ##
@@ -326,65 +342,59 @@ static func _add_gap_marker(root: Node2D, center: Vector2) -> void:
 ##     ⚠️ **最高一级不抖动**：算式2 的余量 29 - TOP_LEDGE_Y 必须原样保住，
 ##        否则「从洞里冒出来后横向够不够得着实地」（算式3）会被吃掉。
 ##     随机种子取自房间格子坐标 → 同层不同竖井形态各异，同一种子完全可复现。
-static func _build_climb_ledges(root: Node2D, origin: Vector2, cell: Vector2i) -> void:
-	var up_x: float = _up_gap_x(origin, cell.y)
-	var floor_y: float = origin.y + ROOM_H - FLOOR_H        # +204
-	var top_y: float = origin.y + TOP_LEDGE_Y               # +23
-
+## 攀爬路径的**数据**（纯几何，不建节点）—— 生成与测试共用同一份，
+## 避免"测试自己算一套"的漂移（v1.4 吃过这个亏）。
+##
+## 返回自下而上的平台列表（**房间局部坐标**）：
+##   {"pos": Vector2, "size": Vector2, "launch": bool}
+## 最后一项是发射台（在洞内、固定 TOP_LEDGE_Y）。
+##
+## 形态对标手写层 PlatformA→B→C：**斜向阶梯**，而不是洞里的等距竖梯。
+##   · 水平两列交替（洞正下方 / 洞旁 dx）→ 每跳横移一个 dx，视觉上是斜的
+##   · **最高一级必须落在洞正下方**（k % 2 == 1 → 洞列）：
+##     若最高一级在洞旁，玩家从它往上跳时头顶会撞上层房间的**地板底面**
+##     （那里没有洞），实测会被顶回来 —— 这是几何硬约束，不是审美选择
+##   · 垂直 4 级均匀，每级 ≈ (bottom - 23)/4 ≈ 36px（与手写层 34–36 一致）
+static func climb_layout_for(cell: Vector2i) -> Array:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(cell) ^ 0x3c9e1b57
 
-	var ladder: Array = _make_ladder(rng, floor_y, top_y)
-	var prev_off: float = 0.0
-	for i in ladder.size():
-		var w: float = rng.randf_range(LEDGE_W_MIN, LEDGE_W_MAX)
-		# 横向可动范围：① 整块要在洞里（算式1）；
-		# ② 还必须覆盖洞中线，否则"按住跳一路往上"会踩空
-		var max_off: float = minf(V_SHAFT_W * 0.5 - w * 0.5, w * 0.5 - 7.0)
-		var off: float = rng.randf_range(-max_off, max_off)
-		if i > 0:
-			# 逐级错位，但单级横向移动不超过 LEDGE_MAX_STEP_X
-			off = clampf(off, prev_off - LEDGE_MAX_STEP_X, prev_off + LEDGE_MAX_STEP_X)
-			off = clampf(off, -max_off, max_off)
-		prev_off = off
-		_add_solid(root, Vector2(up_x + off, ladder[i]), Vector2(w, LEDGE_H), true)
+	var hole_rel: float = gap_x_for_boundary(cell.x, cell.y - 1) - float(cell.x) * ROOM_W
+	# 阶梯铺向房间更宽的一侧，保证 dx 不会被墙截断
+	var sign: float = -1.0 if hole_rel > ROOM_W * 0.5 else 1.0
+	var dx: float = rng.randf_range(CLIMB_DX_MIN, CLIMB_DX_MAX)
+
+	var bottom: float = rng.randf_range(CLIMB_BOTTOM_Y_MIN, CLIMB_BOTTOM_Y_MAX)
+	var step: float = (bottom - TOP_LEDGE_Y) / float(CLIMB_HOPS)
+
+	var out: Array = []
+	for k in CLIMB_HOPS:
+		var y: float = bottom - step * float(k)
+		# 偶数级在洞旁、奇数级回到洞正下方 —— 最高一级（k = CLIMB_HOPS-1）因此落在洞列
+		var x: float = hole_rel if (k % 2 == 1) else hole_rel + sign * dx
+		var w: float = rng.randf_range(CLIMB_PLAT_W_MIN, CLIMB_PLAT_W_MAX)
+		var lo: float = w * 0.5 + WALL_THICK + 4.0
+		var hi: float = ROOM_W - w * 0.5 - WALL_THICK - 4.0
+		out.append({
+			"pos": Vector2(clampf(x, lo, hi), y),
+			"size": Vector2(w, LEDGE_H),
+			"launch": false,
+		})
+
+	out.append({
+		"pos": Vector2(hole_rel, TOP_LEDGE_Y),
+		"size": Vector2(LAUNCH_W, LEDGE_H),
+		"launch": true,
+	})
+	return out
 
 
-## 生成一串**不等距**的台阶 y 坐标（自下而上，最后一级固定为 top_y）。
-##
-## 拒绝采样：级距必须落在 [LEDGE_GAP_MIN, LEDGE_GAP_MAX]，级数落在
-## [LEDGE_COUNT_MIN, LEDGE_COUNT_MAX]；取不到就退回等比阶梯（永远能出结果）。
-##
-## ⚠️ 最后一级必须**精确**等于 top_y：算式2 的余量 29 - TOP_LEDGE_Y 全压在这一级上。
-static func _make_ladder(rng: RandomNumberGenerator, floor_y: float, top_y: float) -> Array:
-	for _attempt in 40:
-		var ys: Array = []
-		var y: float = floor_y
-		var ok := true
-		while true:
-			# 第一级必须抬到玩家头顶之上（见 LEDGE_FIRST_GAP_MIN 的说明）
-			var lo: float = LEDGE_FIRST_GAP_MIN if ys.is_empty() else LEDGE_GAP_MIN
-			var gap: float = rng.randf_range(lo, LEDGE_GAP_MAX)
-			var next_y: float = y - gap
-			if next_y <= top_y + 0.001:
-				# 收尾那一级也必须留够间距，否则顶上两级会挤成一块
-				if y - top_y < LEDGE_GAP_MIN:
-					ok = false
-				break
-			ys.append(next_y)
-			y = next_y
-		ys.append(top_y)
-		if ok and ys.size() >= LEDGE_COUNT_MIN and ys.size() <= LEDGE_COUNT_MAX:
-			return ys
-
-	# 兜底：等比阶梯（v1.3 的形态）
-	var count: int = clampi(6, LEDGE_COUNT_MIN, LEDGE_COUNT_MAX)
-	var step: float = (floor_y - top_y) / float(count)
-	var fallback: Array = []
-	for i in count:
-		fallback.append(floor_y - step * float(i + 1))
-	fallback[count - 1] = top_y
-	return fallback
+## 把攀爬路径变成几何（全部单向平台：从下方可穿过、从上方可站立）
+static func _build_climb_ledges(root: Node2D, origin: Vector2, cell: Vector2i) -> void:
+	for item in climb_layout_for(cell):
+		var rel: Vector2 = item["pos"]
+		var size: Vector2 = item["size"]
+		_add_solid(root, origin + rel, size, true)
 
 
 ## 房间类型的**地面色带**（v1.4：代替原来的"整间上色"）
@@ -411,7 +421,11 @@ static func _add_type_strip(root: Node2D, origin: Vector2, room_type: StringName
 ## ⚠️ 硬约束：任何内部结构都必须离竖井中线 ≥ SHAFT_CLEARANCE，
 ##    否则会堵死攀爬 —— 竖井三算式算的是"空井"，井里有横梁就全废了。
 static func _build_room_interior(root: Node2D, origin: Vector2, cell: Vector2i,
-		room_type: StringName) -> void:
+		room_type: StringName, has_climb: bool) -> void:
+	# 有攀爬阶梯的房间，阶梯本身就是层次，不再叠平台
+	if has_climb:
+		return
+
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(cell) ^ 0x7f4a1c2d
 
