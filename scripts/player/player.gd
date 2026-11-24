@@ -40,11 +40,10 @@ const ATTACK_HITBOX_WIDTH := [17.0, 17.0, 20.0]
 const ATTACK_HITBOX_OFFSET_X := [10.0, 10.0, 12.0]
 const ATTACK_HITBOX_OFFSET_Y := [-13.0, -13.0, -12.0]
 const ATTACK_EXTRA_RECOVERY := [0, 2, 5]
-const COMBO_GRACE := 4
 
 ## ---- 冲刺参数 ----
+## 总帧数含后摇；后摇长度来自 feel.dash_recovery_frames（可实时调参）
 const DASH_TOTAL_FRAMES := 24
-const DASH_RECOVERY_FRAMES := 6    ## 末段后摇（无敌已结束，属风险帧）
 
 var hp: int = 100
 var max_hp: int = 100
@@ -280,7 +279,7 @@ func _update_dash() -> void:
 		_iframe_frames_left = 0
 
 	# ---- 位移：无敌段满速，后摇段衰减 ----
-	if f < DASH_TOTAL_FRAMES - DASH_RECOVERY_FRAMES:
+	if f < DASH_TOTAL_FRAMES - feel.dash_recovery_frames:
 		velocity.x = _dash_dir * feel.dash_speed
 	else:
 		velocity.x = move_toward(velocity.x, 0.0, feel.dash_speed * 0.5)
@@ -327,7 +326,8 @@ func take_damage(damage: int, from_position: Vector2) -> void:
 	if gt:
 		var is_kill: bool = hp == 0
 		gt.request_hitstop(feel.hitstop_kill_frames if is_kill else feel.hitstop_hit_frames)
-		gt.request_shake(feel.shake_kill_amplitude if is_kill else feel.shake_hit_amplitude,
+		# 玩家死亡是本作最重的单次事件 → 用「大招」档屏震（DESIGN 第 6 节 8px 档）
+		gt.request_shake(feel.shake_heavy_amplitude if is_kill else feel.shake_hit_amplitude,
 			feel.shake_duration_frames)
 
 	if hp == 0:
@@ -396,6 +396,13 @@ func _handle_attack_input() -> void:
 	if _is_in_attack():
 		if _can_cancel_attack():
 			_advance_combo()
+		return
+
+	# 攻击已结束：仍在连击输入窗口内 → 接出下一段
+	# （DESIGN 第 6 节「连击输入窗口：缓冲式，不要求精确卡帧」；
+	#   窗口过期由 _update_timers 递减 _combo_grace 归零时复位 _combo_index）
+	if _combo_grace > 0:
+		_advance_combo()
 		return
 
 	_start_attack(0)
@@ -469,7 +476,7 @@ func _update_attack() -> void:
 	elif f >= total:
 		_hitbox.deactivate()
 		if _combo_index < feel.attack_combo_max - 1:
-			_combo_grace = COMBO_GRACE
+			_combo_grace = feel.attack_combo_window_frames
 		else:
 			_combo_index = 0
 		_sm.force_state(S_IDLE if is_on_floor() else S_FALL)

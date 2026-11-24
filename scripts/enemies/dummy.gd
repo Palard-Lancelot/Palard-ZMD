@@ -276,7 +276,8 @@ func take_hit(damage: int, from_position: Vector2) -> void:
 		return
 
 	hp = maxi(0, hp - damage)
-	_flash_frames = 3
+	var feel := _feel()
+	_flash_frames = int(feel.hit_flash_frames) if feel != null else 3
 	_body.color = FLASH_COLOR
 	_update_hp_bar()
 	_apply_hitstop_and_shake()
@@ -339,7 +340,10 @@ func _die() -> void:
 	_body.color = DEAD_COLOR
 	_hp_bar_bg.visible = false
 	if _attack_box and _attack_box.has_method("deactivate"):
-		_attack_box.deactivate()
+		# ⚠️ 死亡可能发生在物理 Flush 期间（玩家攻击盒的 area_entered 回调链里），
+		#    那时直接 deactivate（改 monitoring）会报
+		#    "Can't change this state while flushing queries" —— 延迟到帧末关闭。
+		_attack_box.call_deferred("deactivate")
 	_attack_timer = ATTACK_COOLDOWN
 	var tw := create_tween()
 	tw.set_parallel(true)

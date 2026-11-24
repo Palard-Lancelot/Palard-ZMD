@@ -79,16 +79,14 @@ extends Resource
 ## 攻击后摇（帧）。8 帧 = 每一下挥砍的真实代价
 @export_range(0, 120, 1) var attack_recovery_frames: int = 8
 
-## 连击输入窗口（帧）。缓冲式，不要求精确卡帧
+## 连击输入窗口（帧）：一段攻击结束后，仍能接出下一段连击的时间。
+## 缓冲式，不要求精确卡帧 —— 窗口内按攻击直接接下一段，过期则回到第一段
 @export_range(0, 60, 1) var attack_combo_window_frames: int = 6
 
 ## 最大连击段数
 @export_range(1, 8, 1) var attack_combo_max: int = 3
 
 @export_group("战斗 · 无敌帧")
-
-## 冲刺无敌总时长（帧）。21 帧 ≈ 0.35s
-@export_range(0, 120, 1) var iframe_total_frames: int = 21
 
 ## 无敌起始帧。前几帧不是无敌 → 防"贴脸乱滚"
 @export_range(0, 120, 1) var iframe_start_frame: int = 3
@@ -245,4 +243,7 @@ func validate() -> Array:
 		problems.append("加速度过高（%.0f）—— 会破坏重量感，建议 ≤ %.0f" % [ground_accel, max_run_speed * 30.0])
 	if max_fall_speed < jump_velocity:
 		problems.append("最大下落速度低于跳跃初速 —— 会出现上升比下落慢的怪手感")
+	if iframe_end_frame <= iframe_start_frame:
+		problems.append("无敌结束帧（%d）不晚于起始帧（%d）—— 冲刺没有无敌窗口" % [
+			iframe_end_frame, iframe_start_frame])
 	return problems
