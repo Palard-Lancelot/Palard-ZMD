@@ -13,7 +13,7 @@ config_version=5
 config/name="Palard.zmd"
 config/description="以《明日方舟：终末地》为背景的 2D 横板肉鸽闯关游戏"
 config/version="0.1.0"
-run/main_scene="res://scenes/boot/boot.tscn"
+run/main_scene="res://scenes/menu/main_menu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [autoload]

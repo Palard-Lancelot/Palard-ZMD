@@ -46,6 +46,12 @@ func register_camera(cam: Camera2D) -> void:
 		_shake_origin = camera.offset
 
 
+## 场景切换前调用：否则 camera 指向已释放节点，
+## 屏震/复位会去写一个失效对象（v1.3 起有启动菜单，来回切场景时必须解绑）
+func unregister_camera() -> void:
+	camera = null
+
+
 # ============================================================
 # 顿帧
 # ============================================================
@@ -92,7 +98,8 @@ func request_shake(amplitude: float, frames: int) -> void:
 
 
 func _tick_shake() -> void:
-	if camera == null:
+	if camera == null or not is_instance_valid(camera):
+		camera = null
 		return
 	if _shake_frames <= 0:
 		_restore_camera()
@@ -114,5 +121,7 @@ func _tick_shake() -> void:
 
 
 func _restore_camera() -> void:
-	if camera:
-		camera.offset = _shake_origin
+	if camera == null or not is_instance_valid(camera):
+		camera = null
+		return
+	camera.offset = _shake_origin

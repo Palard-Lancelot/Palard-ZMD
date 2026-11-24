@@ -12,6 +12,9 @@ const FeelConfigScript := preload("res://scripts/config/feel_config.gd")
 
 const BOOTSTRAP_LOG_PREFIX := "[BOOT]"
 
+## 启动菜单（v1.3 起是项目主场景）
+const MENU_SCENE := "res://scenes/menu/main_menu.tscn"
+
 ## 手感配置 —— 全局唯一实例
 ## 用 Resource 而非 FeelConfig 类型标注：
 ##   script 的 class_name 全局注册与 preload 混用会在首帧解析时报
@@ -72,10 +75,10 @@ func _register_game_time() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# 占位：阶段 0 后续任务会在这里处理玩家生成 / 重开
+	# v1.3：Esc 不再直接退出，改为返回启动菜单（在菜单里按 Esc 才是退出）
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_ESCAPE and not DisplayServer.get_name() == "headless":
-			get_tree().quit()
+		if event.keycode == KEY_ESCAPE and DisplayServer.get_name() != "headless":
+			get_tree().change_scene_to_file(MENU_SCENE)
 
 
 # ============================================================
