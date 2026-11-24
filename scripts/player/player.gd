@@ -45,6 +45,11 @@ const ATTACK_EXTRA_RECOVERY := [0, 2, 5]
 ## 总帧数含后摇；后摇长度来自 feel.dash_recovery_frames（可实时调参）
 const DASH_TOTAL_FRAMES := 24
 
+## ---- 单向平台下穿（DESIGN v1.3：W + Space）----
+## 忽略该平台碰撞的帧数：0.25s 足够让脚底离开 10px 厚的台阶，
+## 又短到不会在落地前就恢复碰撞。
+const DROP_THROUGH_FRAMES := 15
+
 var hp: int = 100
 var max_hp: int = 100
 var attack_damage: int = 10
@@ -63,6 +68,10 @@ var _coyote_timer: float = 0.0
 var _jump_buffer_timer: float = 0.0
 var _land_timer: float = 0.0
 var _is_rising: bool = false
+
+## 下穿状态：当前被忽略的平台 + 剩余帧数
+var _drop_body: Node = null
+var _drop_frames_left: int = 0
 
 var debug_state_name: String = "idle"
 var debug_iframe: bool = false
@@ -129,6 +138,7 @@ func _physics_process(delta: float) -> void:
 		_dash_cooldown_timer = maxf(0.0, _dash_cooldown_timer - delta)
 
 	_update_timers(delta)
+	_handle_drop_through_input()
 	_handle_jump_input()
 	_apply_gravity(delta)
 	_update_dash()
@@ -193,6 +203,103 @@ func _handle_jump_input() -> void:
 		_jump_buffer_timer = 0.0
 		_coyote_timer = 0.0
 		_is_rising = true
+
+
+# ============================================================
+# 单向平台下穿（DESIGN v1.3：W + Space）
+# ============================================================
+#
+# 竖井台阶必须是 one_way_collision（从下方可穿过、从上方可站立），
+# 否则玩家从下往上跳会撞头。代价是"上得去、下不来"——
+# 玩家只能原路跳到边缘再落，回退体验从"走"退化成"绕"。下穿补上这个洞。
+#
+# 实现方式：给**这一个**平台加临时碰撞例外，N 帧后移除。
+# 为什么不直接关掉 one_way_collision：
+#   那是 StaticBody 上共享的形状，关掉会影响同一层所有玩家/敌人。
+
+func _handle_drop_through_input() -> void:
+	# 例外计时（顿帧期间本函数在更早处已 return，所以计时也跟着冻结，
+	# 与状态机的帧驱动语义一致）
+	if _drop_frames_left > 0:
+		_drop_frames_left -= 1
+		if _drop_frames_left == 0:
+			_clear_drop_exception()
+
+	if _is_dashing() or _is_hurt() or _is_dead():
+		return
+	if not is_on_floor():
+		return
+	# 必须是 W 按住 + 同一帧按下跳跃
+	if not Input.is_action_pressed("move_up"):
+		return
+	if not Input.is_action_just_pressed("jump"):
+		return
+
+	var body: Node = _one_way_floor_body()
+	if body == null:
+		# 站在实心地/墙上：W+Space 不生效，让它照常走跳跃逻辑
+		return
+
+	add_collision_exception_with(body)
+	_drop_body = body
+	_drop_frames_left = DROP_THROUGH_FRAMES
+
+	# 这次空格是"下穿"，不能同时起跳 —— 清掉跳跃缓冲与土狼计时
+	_jump_buffer_timer = 0.0
+	_coyote_timer = 0.0
+	_land_timer = 0.0
+	# 给一点初速，避免"原地站一帧才掉落"的顿感
+	velocity.y = 40.0
+	if _sm != null and _sm.is_state(S_LAND):
+		_sm.force_state(S_FALL)
+		debug_state_name = str(S_FALL)
+
+
+## 找出脚下那个单向平台的 StaticBody；脚下是实心地/墙则返回 null
+func _one_way_floor_body() -> Node:
+	var count: int = get_slide_collision_count()
+	if count == 0:
+		# 静止帧里滑动碰撞可能为空，兜底用最后一次
+		var last := get_last_slide_collision()
+		if last != null:
+			return _as_one_way(last.get_collider())
+		return null
+
+	for i in count:
+		var c := get_slide_collision(i)
+		if c == null:
+			continue
+		# 只认脚下的碰撞（法线朝上）
+		if c.get_normal().y > -0.7:
+			continue
+		var body: Node = _as_one_way(c.get_collider())
+		if body != null:
+			return body
+	return null
+
+
+## 该碰撞体是否带「单向碰撞」形状
+func _as_one_way(obj: Object) -> Node:
+	var body := obj as Node
+	if body == null:
+		return null
+	for ch in body.get_children():
+		var cs := ch as CollisionShape2D
+		if cs != null and cs.one_way_collision:
+			return body
+	return null
+
+
+func _clear_drop_exception() -> void:
+	if _drop_body != null and is_instance_valid(_drop_body):
+		remove_collision_exception_with(_drop_body)
+	_drop_body = null
+	_drop_frames_left = 0
+
+
+## 是否正在下穿（供测试断言）
+func is_dropping_through() -> bool:
+	return _drop_frames_left > 0
 
 
 func _apply_gravity(delta: float) -> void:
@@ -631,6 +738,7 @@ func respawn() -> void:
 	_dash_cooldown_timer = 0.0
 	_iframe_frames_left = 0
 	_blink_counter = 0
+	_clear_drop_exception()
 	_body_visual.modulate.a = 1.0
 	_body_visual.color = Color(0.35, 0.85, 1, 1)
 	if _hitbox and _hitbox.has_method("deactivate"):
