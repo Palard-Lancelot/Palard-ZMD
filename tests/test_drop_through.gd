@@ -1,11 +1,11 @@
 extends SceneTree
-## 单向平台下穿测试（DESIGN v1.3：W + Space）
+## 单向平台下穿测试（DESIGN v1.3：S + Space）
 ##
 ## 验证四件事：
 ##   1. 玩家能站在单向平台上
 ##   2. **只**按 Space → 正常起跳（下穿逻辑不能把跳跃吃掉）
-##   3. W + Space → 真的从单向平台落下去
-##   4. 站在**实心**地板上 W + Space → **不**穿透（下穿只对 one_way 生效）
+##   3. S + Space → 真的从单向平台落下去
+##   4. 站在**实心**地板上 S + Space → **不**穿透（下穿只对 one_way 生效）
 ##
 ## 为什么自己搭最小场景，而不是用现有关卡：
 ##   这个套件测的是**玩家逻辑**，不是关卡布局。挂在关卡上会让它随
@@ -78,13 +78,13 @@ func _apply_input() -> void:
 				# 只按跳跃：应正常起跳
 				Input.action_press("jump")
 			_:
-				# W + Space：应下穿（实心地板上则无效）
-				Input.action_press("move_up")
+				# S + Space：应下穿（实心地板上则无效）
+				Input.action_press("move_down")
 				Input.action_press("jump")
 	elif _frame == ACT_FRAME + 12:
 		# 长按到顶点：可变跳跃高度会在松手时截断上升
 		Input.action_release("jump")
-		Input.action_release("move_up")
+		Input.action_release("move_down")
 
 
 func _begin_case() -> void:
@@ -121,13 +121,13 @@ func _finish_case() -> void:
 				["起跳高度 %.0f px（> 25）" % (surface - _min_y), _min_y < surface - 25.0],
 			]
 		1:
-			case_name = "单向平台 · W+Space 应下穿"
+			case_name = "单向平台 · S+Space 应下穿"
 			checks = [
 				["触发下穿状态", _dropping_seen],
 				["落到平台下方 %.0f px（> 40）" % (_end_y - surface), _end_y > surface + 40.0],
 			]
 		_:
-			case_name = "实心地板 · W+Space 不应穿透"
+			case_name = "实心地板 · S+Space 不应穿透"
 			checks = [
 				["没有穿下去（落点 y=%.0f，地面 %.0f）" % [_end_y, surface],
 					_end_y <= surface + 3.0],
@@ -196,7 +196,7 @@ func _report() -> void:
 	print("[TEST] ----------------------------------------")
 	print("[TEST] 结果: %d / %d 通过" % [passed, total])
 	if passed == total and total > 0:
-		print("[TEST] ★ W+Space 只在单向平台上生效，跳跃未被影响")
+		print("[TEST] ★ S+Space 只在单向平台上生效，跳跃未被影响")
 	else:
 		print("[TEST] ✗ 有失败项 —— 检查 player.gd 的 _handle_drop_through_input")
 	print("[TEST] ========================================")

@@ -45,7 +45,7 @@ const ATTACK_EXTRA_RECOVERY := [0, 2, 5]
 ## 总帧数含后摇；后摇长度来自 feel.dash_recovery_frames（可实时调参）
 const DASH_TOTAL_FRAMES := 24
 
-## ---- 单向平台下穿（DESIGN v1.3：W + Space）----
+## ---- 单向平台下穿（DESIGN v1.3：S + Space）----
 ## 忽略该平台碰撞的帧数：0.25s 足够让脚底离开 10px 厚的台阶，
 ## 又短到不会在落地前就恢复碰撞。
 const DROP_THROUGH_FRAMES := 15
@@ -206,7 +206,7 @@ func _handle_jump_input() -> void:
 
 
 # ============================================================
-# 单向平台下穿（DESIGN v1.3：W + Space）
+# 单向平台下穿（DESIGN v1.3：S + Space）
 # ============================================================
 #
 # 竖井台阶必须是 one_way_collision（从下方可穿过、从上方可站立），
@@ -229,15 +229,15 @@ func _handle_drop_through_input() -> void:
 		return
 	if not is_on_floor():
 		return
-	# 必须是 W 按住 + 同一帧按下跳跃
-	if not Input.is_action_pressed("move_up"):
+	# 必须是 S 按住 + 同一帧按下跳跃（v1.3 修订：原设计写 W，手感上"下"用 S 更直观）
+	if not Input.is_action_pressed("move_down"):
 		return
 	if not Input.is_action_just_pressed("jump"):
 		return
 
 	var body: Node = _one_way_floor_body()
 	if body == null:
-		# 站在实心地/墙上：W+Space 不生效，让它照常走跳跃逻辑
+		# 站在实心地/墙上：S+Space 不生效，让它照常走跳跃逻辑
 		return
 
 	add_collision_exception_with(body)

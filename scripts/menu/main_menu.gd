@@ -38,6 +38,9 @@ func _ready() -> void:
 		get_tree().quit()
 		return
 
+	# 窗口模式也打一行：导出后排查"为什么直接进了某一关"全靠它
+	print("[MENU] 已进入启动菜单 —— 1 随机层 / 2 手写关 / Esc 退出")
+
 	if _buttons.size() > 0:
 		var first: Button = _buttons[0]
 		first.grab_focus()
@@ -101,7 +104,7 @@ func _build_ui() -> void:
 	box.add_child(_spacer(10))
 
 	_add_entry(box, "1 · 随机生成层",
-		"每按 R 换一层 · 层内连通可回退 · 竖井攀爬 / W+Space 下穿",
+		"每按 R 换一层 · 层内连通可回退 · 竖井攀爬 / S+Space 下穿",
 		GEN_LEVEL, Color(0.45, 0.95, 0.85))
 	_add_entry(box, "2 · 手写测试关",
 		"固定布局 · 清光 9 个敌人 · 0.12 试玩用",
@@ -173,6 +176,7 @@ func _start(scene_path: String) -> void:
 	if _starting:
 		return
 	_starting = true
+	print("[MENU] 进入：%s" % scene_path)
 	_clear_previous_level_state()
 
 	var err: int = get_tree().change_scene_to_file(scene_path)
