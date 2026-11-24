@@ -37,6 +37,10 @@ var _won := false
 var _kills := 0
 var _total_enemies := 0
 
+## 生成中标记：防止连按 R 时多个 _generate 协程互相拆台
+## （每个协程都会 queue_free(_rooms_root)，重入会把别人的节点拆掉）
+var _generating := false
+
 @onready var player: CharacterBody2D = $Player
 @onready var debug_panel: CanvasLayer = $DebugPanel
 @onready var kill_label: Label = $HUD/KillCounter
@@ -59,6 +63,10 @@ func _ready() -> void:
 # ============================================================
 
 func _generate() -> void:
+	if _generating:
+		return
+	_generating = true
+
 	# 清掉上一次的内容（按 R 换种子时用）
 	if _rooms_root != null and is_instance_valid(_rooms_root):
 		_rooms_root.queue_free()
@@ -67,9 +75,17 @@ func _generate() -> void:
 			c.queue_free()
 	await get_tree().process_frame
 
+	# ⚠️ 这个 await 期间玩家可能已经按 Esc 返回菜单 —— 场景被释放后
+	#    协程会继续在被释放的节点上跑（轻则报错，重则在导出版里直接崩）。
+	#    必须重新确认自己还在场景树里。
+	if not is_inside_tree():
+		_generating = false
+		return
+
 	graph = RoomGraphScript.new()
 	if not graph.generate(seed_value):
 		push_error("层生成失败（种子 %d）" % seed_value)
+		_generating = false
 		return
 
 	_rooms_root = LevelBuilder.build(graph, self)
@@ -124,6 +140,8 @@ func _generate() -> void:
 		seed_value, graph.rooms.size(), _total_enemies,
 		graph.stats.get("entrance_exit_dx", -1),
 		"（隔离模式：敌人 AI 已冻结）" if OS.get_environment(ISOLATE_ENV) == "1" else ""])
+
+	_generating = false
 
 
 ## 冻结所有敌人的 AI 与攻击盒（保留可被攻击的靶子）
