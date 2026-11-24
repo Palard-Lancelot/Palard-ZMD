@@ -38,6 +38,16 @@ func _ready() -> void:
 		get_tree().quit()
 		return
 
+	# 自动化冒烟：导出包不支持命令行指定场景，用环境变量直接进关
+	#   PALARD_AUTOSTART=1 → 随机生成层；=2 → 手写测试关
+	var autostart := OS.get_environment("PALARD_AUTOSTART")
+	if autostart == "1":
+		_start(GEN_LEVEL)
+		return
+	elif autostart == "2":
+		_start(HAND_LEVEL)
+		return
+
 	# 窗口模式也打一行：导出后排查"为什么直接进了某一关"全靠它
 	print("[MENU] 已进入启动菜单 —— 1 随机层 / 2 手写关 / Esc 退出")
 
@@ -160,9 +170,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	var handled := true
 	match event.keycode:
 		KEY_1, KEY_KP_1:
+			# ⚠️ 必须先消费输入再切场景：_start() 会触发 change_scene_to_file，
+			#    菜单随即被销毁，之后再 get_viewport() 就是 null
+			#    （实测报 "Cannot call method 'set_input_as_handled' on a null value"）
+			get_viewport().set_input_as_handled()
 			_start(GEN_LEVEL)
+			return
 		KEY_2, KEY_KP_2:
+			get_viewport().set_input_as_handled()
 			_start(HAND_LEVEL)
+			return
 		KEY_ESCAPE:
 			get_tree().quit()
 		_:
@@ -175,14 +192,20 @@ func _unhandled_input(event: InputEvent) -> void:
 func _start(scene_path: String) -> void:
 	if _starting:
 		return
+	if not ResourceLoader.exists(scene_path):
+		push_error("场景不存在：%s" % scene_path)
+		return
+
 	_starting = true
 	print("[MENU] 进入：%s" % scene_path)
 	_clear_previous_level_state()
 
-	var err: int = get_tree().change_scene_to_file(scene_path)
-	if err != OK:
-		_starting = false
-		push_error("切换场景失败：%s（错误码 %d）" % [scene_path, err])
+	# ⚠️ 必须**延迟到帧末**再换场景。
+	#    从 _ready()（PALARD_AUTOSTART 自动进关）或输入回调里直接调
+	#    change_scene_to_file，会在"正在添加/移除子节点"的中间状态下
+	#    remove_child，实测报：
+	#    "Parent node is busy adding/removing children, remove_child() can't be called"
+	get_tree().call_deferred("change_scene_to_file", scene_path)
 
 
 # ============================================================

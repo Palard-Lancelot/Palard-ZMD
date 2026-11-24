@@ -229,5 +229,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			_generate()
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_ESCAPE:
-			get_tree().change_scene_to_file(MENU_SCENE)
+			# ⚠️ 先消费输入再切场景，否则场景被销毁后 get_viewport() 为 null
 			get_viewport().set_input_as_handled()
+			get_tree().change_scene_to_file(MENU_SCENE)
