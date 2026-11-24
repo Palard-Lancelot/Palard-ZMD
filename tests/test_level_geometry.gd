@@ -25,6 +25,11 @@ const ROOM_W := 400.0
 const ROOM_H := 220.0
 const FLOOR_H := 16.0
 
+## 洞位置必须问生成器，不能在本文件复制公式：
+## v1.4 起洞的偏移幅度是随机的，复制一份就会静默漂移
+## （测试还在"通过"，测的却已不是真实几何）。
+const LevelBuilder := preload("res://scripts/world/level_builder.gd")
+
 var _level: Node2D = null
 var _started := false
 var _frame := 0
@@ -138,9 +143,7 @@ func _probe_vertical(space: PhysicsDirectSpaceState2D, ca: Vector2i, cb: Vector2
 	var boundary_row: int = upper_cell.y
 	var boundary_y: float = float(boundary_row + 1) * ROOM_H + 2.0
 
-	var center_x: float = float(lower_cell.x) * ROOM_W + ROOM_W * 0.5
-	var sign: float = -1.0 if (boundary_row % 2 == 0) else 1.0
-	var gap_x: float = center_x + sign * 80.0    # V_SHAFT_SHIFT
+	var gap_x: float = LevelBuilder.gap_x_for_boundary(lower_cell.x, boundary_row)
 
 	# 在洞中心水平打一条短射线（洞宽 100，射线跨度 40，必然在洞内）
 	var pa := Vector2(gap_x - 20.0, boundary_y)

@@ -28,7 +28,9 @@ extends SceneTree
 const ROOM_W := 400.0
 const ROOM_H := 220.0
 const FLOOR_H := 16.0
-const V_SHAFT_SHIFT := 80.0
+
+## 洞位置必须问生成器（v1.4 起偏移幅度随机，公式不能各写一份）
+const LevelBuilder := preload("res://scripts/world/level_builder.gd")
 
 ## 攀 6 级台阶 + 每次起跳 44 帧 → 至少 264 帧，再留横向找落点的余量。
 const MAX_FRAMES := 720
@@ -145,8 +147,7 @@ func _setup_pair(idx: int) -> void:
 	_room_center_x = float(lower.x) * ROOM_W + ROOM_W * 0.5
 	_boundary_y = float(lower.y) * ROOM_H
 	var boundary_row: int = lower.y - 1
-	var sign: float = -1.0 if (boundary_row % 2 == 0) else 1.0
-	_shaft_x = _room_center_x + sign * V_SHAFT_SHIFT
+	_shaft_x = LevelBuilder.gap_x_for_boundary(lower.x, boundary_row)
 	var floor_y: float = float(lower.y) * ROOM_H + ROOM_H - FLOOR_H
 
 	# ⚠️ 必须先把玩家状态清干净：上一组若被敌人打伤/打死，

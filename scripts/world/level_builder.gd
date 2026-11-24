@@ -31,6 +31,9 @@ const COLORS := {
 }
 
 const WALL_COLOR := Color(0.26, 0.29, 0.36, 1)
+## 整层连续底板（v1.4 去盒子化：不再按房间画矩形色块）
+const BG_COLOR := Color(0.10, 0.11, 0.14, 1.0)
+const STRIP_H := 10.0          ## 房间类型地面色带的高度
 
 
 ## 把网格坐标转成房间左下角的世界坐标
@@ -46,16 +49,21 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 	root.name = "GeneratedRooms"
 	parent.add_child(root)
 
-	# --- 背景：每间房一个色块，用类型区分 ---
+	# --- 背景：整层一张连续底板（v1.4 去盒子化）---
+	# 原来每间房画一个彩色矩形 —— 那正是"一格一格的方块"观感的来源。
+	# 现在改成一整张连续底板，房间类型靠地面色带表达。
+	var bounds: Rect2 = layer_bounds(graph)
+	var backdrop := ColorRect.new()
+	backdrop.name = "Backdrop"
+	backdrop.color = BG_COLOR
+	backdrop.position = bounds.position
+	backdrop.size = bounds.size
+	backdrop.z_index = -10
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(backdrop)
+
 	for room in graph.rooms:
-		var origin := cell_to_world(room["cell"])
-		var bg := ColorRect.new()
-		bg.color = COLORS.get(room["type"], COLORS[&"combat"])
-		bg.position = origin
-		bg.size = Vector2(ROOM_W, ROOM_H)
-		bg.z_index = -9
-		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		root.add_child(bg)
+		_add_type_strip(root, cell_to_world(room["cell"]), room["type"])
 
 	# --- 地面 / 天花板（垂直连接处留洞）---
 	for room in graph.rooms:
@@ -84,6 +92,10 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 		if _cell_occupied(graph, cell + Vector2i(0, -1)) >= 0:
 			_build_climb_ledges(root, origin, cell)
 
+	# --- 房间内部层次（v1.4）：让每间房不再是一个空盒子 ---
+	for room in graph.rooms:
+		_build_room_interior(root, cell_to_world(room["cell"]), room["cell"], room["type"])
+
 	return root
 
 
@@ -102,14 +114,26 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 #   上行洞在 center - SHIFT，下行洞在 center + SHIFT。
 #   这样玩家永远能站在「下行洞旁边」的实地上，从上行洞往上跳。
 const V_SHAFT_W := 60.0       ## 洞宽。⚠️ 见下方「洞宽 = 难度」的算式，不要凭感觉调大
-const V_SHAFT_SHIFT := 80.0   ## 上行洞/下行洞相对房间中心的偏移（错开的关键）
+## 洞口相对房间中心的偏移幅度（v1.4 起随机）。
+## 符号仍由**边界行号奇偶**决定 → 同一房间的上行洞与下行洞必然分处两侧，
+## 两者间距 >= 2 × V_SHAFT_SHIFT_MIN = 96px > 洞宽 60，永远不会连成一条竖井。
+const V_SHAFT_SHIFT_MIN := 48.0
+const V_SHAFT_SHIFT_MAX := 86.0
+const SHAFT_CLEARANCE := 45.0 ## 房间内部结构必须离竖井中线这么远（否则堵死攀爬）
 const LEDGE_W_MIN := 36.0     ## 台阶宽下限（v1.3 起在 MIN–MAX 之间随机）
 const LEDGE_W_MAX := 46.0     ## 上限。算式1：LEDGE_W/2 + 玩家半宽 6 <= V_SHAFT_W/2 = 30 → 必须 <= 48
 const LEDGE_H := 10.0
-const LEDGE_COUNT_MIN := 5    ## 级数下限。4 级 = 每级 45.25px > 实测起跳 45px，跳不上去
-const LEDGE_COUNT_MAX := 7    ## 级数上限（再多只是把台阶切得更碎，看不出更好）
-const LEDGE_JITTER_Y := 2.0   ## 中间级纵向抖动 ±2px：相邻级间距仍 <= 40px < 45px 起跳高度
+const LEDGE_COUNT_MIN := 5    ## 级数下限。4 级时平均级距 45.25px > 实测起跳 45px
+const LEDGE_COUNT_MAX := 8    ## 级数上限（v1.4 改不等距后自然落在 5–8）
+const LEDGE_GAP_MIN := 18.0   ## 相邻两级的最小垂直间距（v1.4：不再等距）
+const LEDGE_GAP_MAX := 38.0   ## 最大垂直间距。必须 < 实测起跳 45px，留 7px 余量
+## 最低一级离地面的**最小**高度。必须 > 玩家身高 22px（+余量）：
+## 否则玩家站在地面上时身体会和台阶重叠（台阶是单向平台，走过去会"穿胸"），
+## 而且贴着地面的台阶会被"走路高度"的射线当成墙（test_level_geometry 5/11/17px）。
+const LEDGE_FIRST_GAP_MIN := 32.0
+const LEDGE_MAX_STEP_X := 10.0 ## 相邻两级的水平错位上限（再大就跳不过去）
 const TOP_LEDGE_Y := 23.0     ## 最高一级台阶的 y（相对房间原点）。算式见 _build_climb_ledges
+const PLAT_H_INNER := 8.0     ## 房间内部平台厚度
 
 ## 某个"水平边界"上的洞的 x 坐标。
 ##
@@ -119,13 +143,28 @@ const TOP_LEDGE_Y := 23.0     ## 最高一级台阶的 y（相对房间原点）
 ##      两者错位 → 玩家在 930 往上爬，撞到 A 房在 1070 之外的实心地板。
 ##      实测 7 组垂直通道全部卡在 181px（差一点进不去）。
 ##
-##    现在改为：洞的位置只由**边界所在行号**决定，且逐行交替左右。
+##    现在改为：洞的位置只由**边界**（列 + 边界行号）决定。
 ##    这样既能保证上下房间的洞严格对齐，
 ##    又能让同一个房间的上洞和下洞错开（否则玩家会一口气从顶层掉到底）。
 static func _gap_x_for_row(origin: Vector2, boundary_row: int) -> float:
-	var center: float = origin.x + ROOM_W * 0.5
+	var cell_x: int = int(round(origin.x / ROOM_W))
+	return gap_x_for_boundary(cell_x, boundary_row)
+
+
+## 洞中心的**权威算法**。测试必须调这个，不要各自复制公式 ——
+## v1.3 之前 test_level_geometry 与 test_vertical_climb 都硬编码过 80.0，
+## 生成器一改就静默漂移（测试还在"通过"，但它测的已经不是真实几何）。
+##
+##   · 符号：由边界行号奇偶决定 → 同一房间的上洞与下洞必然分处两侧
+##   · 幅度：v1.4 起在 [V_SHAFT_SHIFT_MIN, V_SHAFT_SHIFT_MAX] 内随机
+##   · 种子只由「列 + 边界行」决定 → 相邻两房共享同一条边界时取到同一个洞
+static func gap_x_for_boundary(cell_x: int, boundary_row: int) -> float:
+	var center: float = float(cell_x) * ROOM_W + ROOM_W * 0.5
 	var sign: float = -1.0 if (boundary_row % 2 == 0) else 1.0
-	return center + sign * V_SHAFT_SHIFT
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector2i(cell_x, boundary_row)) ^ 0x5a17c3e9
+	var mag: float = rng.randf_range(V_SHAFT_SHIFT_MIN, V_SHAFT_SHIFT_MAX)
+	return center + sign * mag
 
 
 ## 房间的**上行洞**（通往上一层）x 坐标：属于本层与上一层的边界
@@ -293,20 +332,122 @@ static func _build_climb_ledges(root: Node2D, origin: Vector2, cell: Vector2i) -
 	var top_y: float = origin.y + TOP_LEDGE_Y               # +23
 
 	var rng := RandomNumberGenerator.new()
-	rng.seed = hash(cell)
+	rng.seed = hash(cell) ^ 0x3c9e1b57
 
-	var count: int = rng.randi_range(LEDGE_COUNT_MIN, LEDGE_COUNT_MAX)
-	var step: float = (floor_y - top_y) / float(count)
-
-	for i in count:
+	var ladder: Array = _make_ladder(rng, floor_y, top_y)
+	var prev_off: float = 0.0
+	for i in ladder.size():
 		var w: float = rng.randf_range(LEDGE_W_MIN, LEDGE_W_MAX)
-		# 整块必须塞进洞里（算式1），否则玩家站在台边会撞上层地板底面
-		var max_off: float = V_SHAFT_W * 0.5 - w * 0.5
+		# 横向可动范围：① 整块要在洞里（算式1）；
+		# ② 还必须覆盖洞中线，否则"按住跳一路往上"会踩空
+		var max_off: float = minf(V_SHAFT_W * 0.5 - w * 0.5, w * 0.5 - 7.0)
 		var off: float = rng.randf_range(-max_off, max_off)
-		var y: float = floor_y - step * float(i + 1)
-		if i < count - 1:
-			y += rng.randf_range(-LEDGE_JITTER_Y, LEDGE_JITTER_Y)
-		_add_solid(root, Vector2(up_x + off, y), Vector2(w, LEDGE_H), true)
+		if i > 0:
+			# 逐级错位，但单级横向移动不超过 LEDGE_MAX_STEP_X
+			off = clampf(off, prev_off - LEDGE_MAX_STEP_X, prev_off + LEDGE_MAX_STEP_X)
+			off = clampf(off, -max_off, max_off)
+		prev_off = off
+		_add_solid(root, Vector2(up_x + off, ladder[i]), Vector2(w, LEDGE_H), true)
+
+
+## 生成一串**不等距**的台阶 y 坐标（自下而上，最后一级固定为 top_y）。
+##
+## 拒绝采样：级距必须落在 [LEDGE_GAP_MIN, LEDGE_GAP_MAX]，级数落在
+## [LEDGE_COUNT_MIN, LEDGE_COUNT_MAX]；取不到就退回等比阶梯（永远能出结果）。
+##
+## ⚠️ 最后一级必须**精确**等于 top_y：算式2 的余量 29 - TOP_LEDGE_Y 全压在这一级上。
+static func _make_ladder(rng: RandomNumberGenerator, floor_y: float, top_y: float) -> Array:
+	for _attempt in 40:
+		var ys: Array = []
+		var y: float = floor_y
+		var ok := true
+		while true:
+			# 第一级必须抬到玩家头顶之上（见 LEDGE_FIRST_GAP_MIN 的说明）
+			var lo: float = LEDGE_FIRST_GAP_MIN if ys.is_empty() else LEDGE_GAP_MIN
+			var gap: float = rng.randf_range(lo, LEDGE_GAP_MAX)
+			var next_y: float = y - gap
+			if next_y <= top_y + 0.001:
+				# 收尾那一级也必须留够间距，否则顶上两级会挤成一块
+				if y - top_y < LEDGE_GAP_MIN:
+					ok = false
+				break
+			ys.append(next_y)
+			y = next_y
+		ys.append(top_y)
+		if ok and ys.size() >= LEDGE_COUNT_MIN and ys.size() <= LEDGE_COUNT_MAX:
+			return ys
+
+	# 兜底：等比阶梯（v1.3 的形态）
+	var count: int = clampi(6, LEDGE_COUNT_MIN, LEDGE_COUNT_MAX)
+	var step: float = (floor_y - top_y) / float(count)
+	var fallback: Array = []
+	for i in count:
+		fallback.append(floor_y - step * float(i + 1))
+	fallback[count - 1] = top_y
+	return fallback
+
+
+## 房间类型的**地面色带**（v1.4：代替原来的"整间上色"）
+## 只在地面附近留一条半透明色带 —— 既能一眼分辨房间类型，
+## 又不会把整层画成一格一格的彩色方块。
+static func _add_type_strip(root: Node2D, origin: Vector2, room_type: StringName) -> void:
+	var c: Color = COLORS.get(room_type, COLORS[&"combat"])
+	var strip := ColorRect.new()
+	strip.name = "TypeStrip"
+	strip.color = Color(c.r, c.g, c.b, 0.55)
+	strip.position = Vector2(origin.x + 3.0, origin.y + ROOM_H - FLOOR_H - STRIP_H)
+	strip.size = Vector2(ROOM_W - 6.0, STRIP_H)
+	strip.z_index = -8
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(strip)
+
+
+## 房间内部层次（v1.4 去盒子化）：让每间房不再是一个空盒子。
+##
+## 只放两类东西，且都能被现有测试证明"无害"：
+##   · 单向平台：不阻挡任何行走 / 垂直通道（玩家从下方可穿过）
+##   · 实心夹层：离地 ≥ 72px、离侧墙 ≥ 90px —— 不挡门洞、不挡走路高度
+##
+## ⚠️ 硬约束：任何内部结构都必须离竖井中线 ≥ SHAFT_CLEARANCE，
+##    否则会堵死攀爬 —— 竖井三算式算的是"空井"，井里有横梁就全废了。
+static func _build_room_interior(root: Node2D, origin: Vector2, cell: Vector2i,
+		room_type: StringName) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(cell) ^ 0x7f4a1c2d
+
+	var up_x: float = _up_gap_x(origin, cell.y)
+	var down_x: float = _down_gap_x(origin, cell.y)
+	var floor_y: float = origin.y + ROOM_H - FLOOR_H
+
+	# --- 单向平台：1–3 块，离地 40–150px ---
+	var plat_count: int = rng.randi_range(1, 3)
+	for _i in plat_count:
+		var w: float = rng.randf_range(50.0, 120.0)
+		var h: float = rng.randf_range(40.0, 150.0)
+		var x: float = origin.x + rng.randf_range(w * 0.5 + 24.0, ROOM_W - w * 0.5 - 24.0)
+		if _near_shaft(x, w, up_x) or _near_shaft(x, w, down_x):
+			continue
+		_add_solid(root, Vector2(x, floor_y - h), Vector2(w, PLAT_H_INNER), true)
+
+	# --- 实心夹层：只有战斗房/精英房有一半概率，制造多层结构 ---
+	# 注意：房间类型常量定义在 room_graph.gd；本文件一贯用字面量（COLORS 的键也是）
+	if room_type != &"combat" and room_type != &"elite":
+		return
+	if rng.randf() >= 0.5:
+		return
+
+	var w2: float = rng.randf_range(70.0, 140.0)
+	var h2: float = rng.randf_range(72.0, 140.0)
+	# 离两侧墙各留 90px → 绝不挡住门洞（门洞贴着墙）
+	var x2: float = origin.x + rng.randf_range(w2 * 0.5 + 90.0, ROOM_W - w2 * 0.5 - 90.0)
+	if _near_shaft(x2, w2, up_x) or _near_shaft(x2, w2, down_x):
+		return
+	_add_solid(root, Vector2(x2, floor_y - h2), Vector2(w2, PLAT_H_INNER), false)
+
+
+## 结构是否侵入竖井通道（上/下行洞中线 ± SHAFT_CLEARANCE）
+static func _near_shaft(x: float, w: float, shaft_x: float) -> bool:
+	return absf(x - shaft_x) < (w * 0.5 + SHAFT_CLEARANCE)
 
 
 ## 判断某格是否已被某个房间占据
