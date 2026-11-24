@@ -22,6 +22,9 @@ const RusherScene := preload("res://scenes/enemies/rusher.tscn")
 ##    这类"测试环境本身引入了噪声"的坑，比被测代码的 bug 更难查。
 const ISOLATE_ENV := "PALARD_ISOLATE"
 
+## 启动菜单（v1.3）
+const MENU_SCENE := "res://scenes/menu/main_menu.tscn"
+
 ## 默认种子（可按 R 换一个）
 var seed_value: int = 12345
 
@@ -85,6 +88,11 @@ func _generate() -> void:
 		cam.limit_right = int(bounds.position.x + bounds.size.x)
 		cam.limit_top = int(bounds.position.y - 80.0)
 		cam.limit_bottom = int(bounds.position.y + bounds.size.y)
+		# 注册到 GameTime，屏震才有作用对象（v1.3：原来随机层完全没注册，
+		# 玩家受击的 8px 屏震在这里一直静默失效）
+		var gt := get_node_or_null("/root/GameTime")
+		if gt:
+			gt.register_camera(cam)
 
 	# --- 战斗房里放敌人 ---
 	_total_enemies = 0
@@ -201,4 +209,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			# 换一个种子重新生成 —— 这就是"每局不同"的原型
 			seed_value = randi() % 100000
 			_generate()
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_ESCAPE:
+			get_tree().change_scene_to_file(MENU_SCENE)
 			get_viewport().set_input_as_handled()

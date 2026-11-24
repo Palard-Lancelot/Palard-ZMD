@@ -82,7 +82,7 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 		var origin := cell_to_world(room["cell"])
 		var cell: Vector2i = room["cell"]
 		if _cell_occupied(graph, cell + Vector2i(0, -1)) >= 0:
-			_build_climb_ledges(root, origin, cell.y)
+			_build_climb_ledges(root, origin, cell)
 
 	return root
 
@@ -103,9 +103,12 @@ static func build(graph: RefCounted, parent: Node2D) -> Node2D:
 #   这样玩家永远能站在「下行洞旁边」的实地上，从上行洞往上跳。
 const V_SHAFT_W := 60.0       ## 洞宽。⚠️ 见下方「洞宽 = 难度」的算式，不要凭感觉调大
 const V_SHAFT_SHIFT := 80.0   ## 上行洞/下行洞相对房间中心的偏移（错开的关键）
-const LEDGE_W := 44.0         ## 台阶宽。必须塞得进洞里（见算式）
+const LEDGE_W_MIN := 36.0     ## 台阶宽下限（v1.3 起在 MIN–MAX 之间随机）
+const LEDGE_W_MAX := 46.0     ## 上限。算式1：LEDGE_W/2 + 玩家半宽 6 <= V_SHAFT_W/2 = 30 → 必须 <= 48
 const LEDGE_H := 10.0
-const LEDGE_COUNT := 6        ## 台阶数：越多最后一段越短，越容易跳上去
+const LEDGE_COUNT_MIN := 5    ## 级数下限。4 级 = 每级 45.25px > 实测起跳 45px，跳不上去
+const LEDGE_COUNT_MAX := 7    ## 级数上限（再多只是把台阶切得更碎，看不出更好）
+const LEDGE_JITTER_Y := 2.0   ## 中间级纵向抖动 ±2px：相邻级间距仍 <= 40px < 45px 起跳高度
 const TOP_LEDGE_Y := 23.0     ## 最高一级台阶的 y（相对房间原点）。算式见 _build_climb_ledges
 
 ## 某个"水平边界"上的洞的 x 坐标。
@@ -274,16 +277,36 @@ static func _add_gap_marker(root: Node2D, center: Vector2) -> void:
 ##   【为什么不再左右交错】
 ##     交错能增加路线变化，但会让玩家冒出的位置偏离洞中线、把算式 3 的
 ##     余量吃掉。竖井攀爬的正确手感是「按住跳一路往上」，不需要之字形。
-static func _build_climb_ledges(root: Node2D, origin: Vector2, room_row: int) -> void:
-	var up_x: float = _up_gap_x(origin, room_row)
+##
+##   【v1.3：形态随机，但三个算式是硬约束】
+##     随机只能在这些量上动，且都受算式限制：
+##       级数 count ∈ [5, 7]        4 级时每级 45.25px > 起跳 45px，跳不上去
+##       宽度 w    ∈ [36, 46]       算式1：w/2 + 6 <= 30
+##       水平错位 off：|off| <= 30 - w/2    整块仍必须落在洞里
+##       中间级纵向抖动 ±2px         相邻级间距 <= 40px，仍远小于起跳高度
+##     ⚠️ **最高一级不抖动**：算式2 的余量 29 - TOP_LEDGE_Y 必须原样保住，
+##        否则「从洞里冒出来后横向够不够得着实地」（算式3）会被吃掉。
+##     随机种子取自房间格子坐标 → 同层不同竖井形态各异，同一种子完全可复现。
+static func _build_climb_ledges(root: Node2D, origin: Vector2, cell: Vector2i) -> void:
+	var up_x: float = _up_gap_x(origin, cell.y)
 	var floor_y: float = origin.y + ROOM_H - FLOOR_H        # +204
 	var top_y: float = origin.y + TOP_LEDGE_Y               # +23
-	var step: float = (floor_y - top_y) / float(LEDGE_COUNT)
 
-	for i in LEDGE_COUNT:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(cell)
+
+	var count: int = rng.randi_range(LEDGE_COUNT_MIN, LEDGE_COUNT_MAX)
+	var step: float = (floor_y - top_y) / float(count)
+
+	for i in count:
+		var w: float = rng.randf_range(LEDGE_W_MIN, LEDGE_W_MAX)
+		# 整块必须塞进洞里（算式1），否则玩家站在台边会撞上层地板底面
+		var max_off: float = V_SHAFT_W * 0.5 - w * 0.5
+		var off: float = rng.randf_range(-max_off, max_off)
 		var y: float = floor_y - step * float(i + 1)
-		# 竖直正对洞中线：玩家只需按住跳跃，不用左右找位置
-		_add_solid(root, Vector2(up_x, y), Vector2(LEDGE_W, LEDGE_H), true)
+		if i < count - 1:
+			y += rng.randf_range(-LEDGE_JITTER_Y, LEDGE_JITTER_Y)
+		_add_solid(root, Vector2(up_x + off, y), Vector2(w, LEDGE_H), true)
 
 
 ## 判断某格是否已被某个房间占据
